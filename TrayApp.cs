@@ -2,9 +2,9 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using IdlePulse.Models;
-using IdlePulse.Services;
-using IdlePulse.Views;
+using ShutdownGuard.Models;
+using ShutdownGuard.Services;
+using ShutdownGuard.Views;
 using Hardcodet.Wpf.TaskbarNotification;
 using Wpf.Ui.Controls;
 using ContextMenu = System.Windows.Controls.ContextMenu;
@@ -13,7 +13,7 @@ using TextBlock = System.Windows.Controls.TextBlock;
 using StackPanel = System.Windows.Controls.StackPanel;
 using Orientation = System.Windows.Controls.Orientation;
 
-namespace IdlePulse;
+namespace ShutdownGuard;
 
 public sealed class TrayApp : IDisposable
 {
@@ -43,7 +43,7 @@ public sealed class TrayApp : IDisposable
 
         _trayIcon = new TaskbarIcon
         {
-            ToolTipText = "IdlePulse",
+            ToolTipText = "ShutdownGuard",
             IconSource = _defaultIconSource,
             ContextMenu = BuildContextMenu()
         };
@@ -256,8 +256,8 @@ public sealed class TrayApp : IDisposable
     {
         if (_trayIcon == null) return;
         _trayIcon.ToolTipText = _config.Enabled
-            ? $"IdlePulse — {_config.Action} after {FormatDuration(TimeSpan.FromSeconds(_config.IdleSeconds))} idle"
-            : "IdlePulse — paused";
+            ? $"ShutdownGuard — {_config.Action} after {FormatDuration(TimeSpan.FromSeconds(_config.IdleSeconds))} idle"
+            : "ShutdownGuard — paused";
     }
 
 

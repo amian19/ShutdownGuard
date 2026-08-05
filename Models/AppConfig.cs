@@ -1,4 +1,4 @@
-namespace IdlePulse.Models;
+namespace ShutdownGuard.Models;
 
 public enum PowerAction
 {

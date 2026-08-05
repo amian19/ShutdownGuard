@@ -1,7 +1,7 @@
 using System.IO;
 using Microsoft.Win32;
 
-namespace IdlePulse.Services;
+namespace ShutdownGuard.Services;
 
 public sealed class StartupClearReport
 {
@@ -15,7 +15,7 @@ public sealed class StartupClearReport
 public static class AutostartManager
 {
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string ValueName = "IdlePulse";
+    private const string ValueName = "ShutdownGuard";
 
     public static bool IsEnabled()
     {

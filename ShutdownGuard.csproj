@@ -7,14 +7,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>false</UseWindowsForms>
-    <RootNamespace>IdlePulse</RootNamespace>
+    <RootNamespace>ShutdownGuard</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <AssemblyName>IdlePulse</AssemblyName>
+    <AssemblyName>ShutdownGuard</AssemblyName>
     <ApplicationIcon>Assets\IdlePulse.ico</ApplicationIcon>
     <Version>1.0.1</Version>
-    <Company>IdlePulse</Company>
-    <Product>IdlePulse</Product>
-    <Description>Idle-triggered shutdown, sleep, hibernate, or lock for Windows.</Description>
+    <Company>ShutdownGuard</Company>
+    <Product>ShutdownGuard</Product>
+    <Description>Windows auto-shutdown scheduler — reminds and shuts down at fixed times.</Description>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)'=='Release'">

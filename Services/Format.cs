@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace IdlePulse.Services;
+namespace ShutdownGuard.Services;
 
 internal static class Format
 {

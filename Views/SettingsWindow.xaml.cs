@@ -2,12 +2,12 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
-using IdlePulse.Models;
-using IdlePulse.Native;
-using IdlePulse.Services;
+using ShutdownGuard.Models;
+using ShutdownGuard.Native;
+using ShutdownGuard.Services;
 using Wpf.Ui.Controls;
 
-namespace IdlePulse.Views;
+namespace ShutdownGuard.Views;
 
 public partial class SettingsWindow : FluentWindow
 {

@@ -1,7 +1,7 @@
 using System.Windows;
 using Wpf.Ui.Controls;
 
-namespace IdlePulse.Services;
+namespace ShutdownGuard.Services;
 
 public static class Dialogs
 {

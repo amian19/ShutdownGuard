@@ -1,9 +1,9 @@
 using System.Windows;
 using System.Windows.Threading;
-using IdlePulse.Models;
+using ShutdownGuard.Models;
 using Wpf.Ui.Controls;
 
-namespace IdlePulse.Views;
+namespace ShutdownGuard.Views;
 
 public partial class CountdownWindow : FluentWindow
 {

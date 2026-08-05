@@ -1,15 +1,15 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using IdlePulse.Models;
+using ShutdownGuard.Models;
 using Microsoft.Win32;
 
-namespace IdlePulse.Services;
+namespace ShutdownGuard.Services;
 
 public sealed class ConfigStore
 {
     private static readonly string AppData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-    private static readonly string ConfigDir = Path.Combine(AppData, "IdlePulse");
+    private static readonly string ConfigDir = Path.Combine(AppData, "ShutdownGuard");
     private static readonly string ConfigPath = Path.Combine(ConfigDir, "config.json");
 
     private static readonly string LegacyConfigDir = Path.Combine(AppData, "AutoShutdown");

@@ -3,11 +3,11 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows;
-using IdlePulse.Models;
-using IdlePulse.Services;
+using ShutdownGuard.Models;
+using ShutdownGuard.Services;
 using Wpf.Ui.Controls;
 
-namespace IdlePulse.Views;
+namespace ShutdownGuard.Views;
 
 public partial class AppSettingsWindow : FluentWindow
 {
@@ -16,7 +16,7 @@ public partial class AppSettingsWindow : FluentWindow
 
     private static readonly string ConfigDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "IdlePulse");
+        "ShutdownGuard");
     private static readonly string ConfigPath = Path.Combine(ConfigDir, "config.json");
     private static readonly string CrashLogPath = Path.Combine(ConfigDir, "crash.log");
 

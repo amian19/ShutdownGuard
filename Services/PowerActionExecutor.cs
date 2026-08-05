@@ -1,8 +1,8 @@
 using System.Diagnostics;
-using IdlePulse.Models;
-using IdlePulse.Native;
+using ShutdownGuard.Models;
+using ShutdownGuard.Native;
 
-namespace IdlePulse.Services;
+namespace ShutdownGuard.Services;
 
 public static class PowerActionExecutor
 {

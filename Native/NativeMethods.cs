@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace IdlePulse.Native;
+namespace ShutdownGuard.Native;
 
 internal static partial class NativeMethods
 {

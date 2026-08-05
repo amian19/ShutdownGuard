@@ -2,6 +2,7 @@
 bin/
 obj/
 publish/
+publish-baseline/
 out/
 
 # Installer output (compiled Setup.exe — large binary, build via tools/build-installer.ps1)

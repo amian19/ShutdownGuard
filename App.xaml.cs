@@ -3,17 +3,17 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
 
-namespace IdlePulse;
+namespace ShutdownGuard;
 
 public partial class App : Application
 {
-    private const string MutexName = "Global\\IdlePulse_SingleInstance_8F3C2A";
+    private const string MutexName = "Global\\ShutdownGuard_SingleInstance_8F3C2A";
     private Mutex? _mutex;
     private TrayApp? _trayApp;
 
     private static readonly string LogPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "IdlePulse", "crash.log");
+        "ShutdownGuard", "crash.log");
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -53,8 +53,8 @@ public partial class App : Application
     {
         var box = new Wpf.Ui.Controls.MessageBox
         {
-            Title = "IdlePulse",
-            Content = "IdlePulse is already running. Check the system tray.",
+            Title = "ShutdownGuard",
+            Content = "ShutdownGuard is already running. Check the system tray.",
             CloseButtonText = "OK",
             IsPrimaryButtonEnabled = false,
             IsSecondaryButtonEnabled = false
@@ -77,7 +77,7 @@ public partial class App : Application
             {
                 var box = new Wpf.Ui.Controls.MessageBox
                 {
-                    Title = $"IdlePulse — Error ({source})",
+                    Title = $"ShutdownGuard — Error ({source})",
                     Content = $"{ex?.Message}\n\nDetails written to:\n{LogPath}",
                     CloseButtonText = "OK",
                     IsPrimaryButtonEnabled = false,
@@ -90,8 +90,8 @@ public partial class App : Application
             }
             catch
             {
-                MessageBox.Show($"IdlePulse error ({source}):\n\n{ex?.Message}\n\nDetails written to:\n{LogPath}",
-                    "IdlePulse — Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"ShutdownGuard error ({source}):\n\n{ex?.Message}\n\nDetails written to:\n{LogPath}",
+                    "ShutdownGuard — Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
         catch { }

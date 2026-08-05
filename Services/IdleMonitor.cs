@@ -1,9 +1,9 @@
 using System.Windows.Threading;
-using IdlePulse.Models;
-using IdlePulse.Native;
+using ShutdownGuard.Models;
+using ShutdownGuard.Native;
 using Microsoft.Win32;
 
-namespace IdlePulse.Services;
+namespace ShutdownGuard.Services;
 
 public sealed class IdleMonitor : IDisposable
 {
