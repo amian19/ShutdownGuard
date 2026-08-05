@@ -33,17 +33,6 @@
 
   <ItemGroup>
     <Resource Include="Assets\IdlePulse.ico" />
-    <Resource Include="Assets\IdlePulse-active.ico" />
-    <Resource Include="Assets\IdlePulse-512.png" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Remove="tools\**" />
-    <Page Remove="tools\**" />
-    <ApplicationDefinition Remove="tools\**" />
-    <Resource Remove="tools\**" />
-    <None Remove="tools\**" />
-    <None Include="tools\**" />
   </ItemGroup>
 
 </Project>
