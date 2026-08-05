@@ -68,7 +68,7 @@ public static class AutostartManager
             var startupFolder = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
             if (Directory.Exists(startupFolder))
             {
-                foreach (var lnk in Directory.GetFiles(startupFolder, "*IdlePulse*.lnk"))
+                foreach (var lnk in Directory.GetFiles(startupFolder, "*ShutdownGuard*.lnk"))
                 {
                     try
                     {

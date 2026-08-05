@@ -41,13 +41,7 @@ public partial class App : Application
         base.OnStartup(e);
         _trayApp = new TrayApp();
         _trayApp.Start();
-
-        if (e.Args.Contains("--open-settings"))
-            Dispatcher.BeginInvoke(() => _trayApp.OpenSettings());
     }
-
-    // Exposed for the screenshot tool
-    public TrayApp? Tray => _trayApp;
 
     private static void ShowAlreadyRunningDialog()
     {
