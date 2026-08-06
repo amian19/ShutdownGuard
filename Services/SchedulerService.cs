@@ -9,6 +9,13 @@ namespace ShutdownGuard.Services;
 /// </summary>
 public sealed class SchedulerService : IAsyncDisposable
 {
+    /// <summary>
+    /// If the loop wakes within this skew of the armed ReminderStart,
+    /// treat entry as Scheduled rather than TimeAdvance.
+    /// Covers the 1-second poll cadence without mislabeling normal ticks.
+    /// </summary>
+    private static readonly TimeSpan ScheduledSkew = TimeSpan.FromSeconds(2);
+
     private readonly DailyPolicy _policy = new();
     private readonly IClock _clock;
     private readonly object _lock = new();
@@ -29,11 +36,20 @@ public sealed class SchedulerService : IAsyncDisposable
     /// </summary>
     private DateTimeOffset? _lastReminderOccurrence;
 
+    /// <summary>
+    /// Why the currently armed past-or-future occurrence is expected to enter.
+    /// Set when arming; refined at fire time for Scheduled → TimeAdvance.
+    /// </summary>
+    private ReminderWindowEntryReason _pendingEntryReason = ReminderWindowEntryReason.Scheduled;
+
     public event Action<DateTimeOffset>? ReminderWindowStarted;
     public event Action<DateTimeOffset?>? NextReminderChanged;
 
     public DateTimeOffset? NextReminder { get; private set; }
     public bool IsRunning => _loopTask is { IsCompleted: false };
+
+    /// <summary>Last successful reminder-window entry reason (for tests / diagnostics).</summary>
+    internal ReminderWindowEntryReason? LastEntryReason { get; private set; }
 
     public SchedulerService(IClock clock)
     {
@@ -57,7 +73,7 @@ public sealed class SchedulerService : IAsyncDisposable
                 ReminderStartTime = plan.ReminderStartTime,
                 DryRun = plan.DryRun
             };
-            _armedOccurrence = ComputeArmedOccurrence();
+            _armedOccurrence = ComputeArmedOccurrence(ReminderWindowEntryReason.PlanUpdate);
             SyncNextReminder();
         }
     }
@@ -70,7 +86,7 @@ public sealed class SchedulerService : IAsyncDisposable
         {
             if (IsRunning) return;
 
-            _armedOccurrence = ComputeArmedOccurrence();
+            _armedOccurrence = ComputeArmedOccurrence(ReminderWindowEntryReason.Startup);
             SyncNextReminder();
 
             _cts = new CancellationTokenSource();
@@ -113,11 +129,11 @@ public sealed class SchedulerService : IAsyncDisposable
     /// <summary>
     /// Arms the next reminder-start occurrence:
     /// - Disabled → null
-    /// - Before ReminderStart today → today's ReminderStart
-    /// - Inside [ReminderStart, 22:00) and not yet fired → today's ReminderStart (enter now)
+    /// - Before ReminderStart today → today's ReminderStart (Scheduled)
+    /// - Inside [ReminderStart, 22:00) and not yet fired → today's ReminderStart (context reason)
     /// - At/after 22:00 → tomorrow's ReminderStart (no catch-up)
     /// </summary>
-    private DateTimeOffset? ComputeArmedOccurrence()
+    private DateTimeOffset? ComputeArmedOccurrence(ReminderWindowEntryReason insideWindowReason)
     {
         if (!_plan.Enabled)
             return null;
@@ -133,18 +149,26 @@ public sealed class SchedulerService : IAsyncDisposable
             todayReminder.Value.Offset);
 
         if (now < todayReminder.Value)
+        {
+            _pendingEntryReason = ReminderWindowEntryReason.Scheduled;
             return todayReminder;
+        }
 
         if (now < todayShutdownDto)
         {
             // Inside reminder window — arm today's start so the loop can enter once.
             if (_lastReminderOccurrence == todayReminder.Value)
+            {
+                _pendingEntryReason = ReminderWindowEntryReason.Scheduled;
                 return todayReminder.Value.AddDays(1);
+            }
 
+            _pendingEntryReason = insideWindowReason;
             return todayReminder;
         }
 
         // Past fixed shutdown — wait for tomorrow (never catch up shutdown or reminder).
+        _pendingEntryReason = ReminderWindowEntryReason.Scheduled;
         return todayReminder.Value.AddDays(1);
     }
 
@@ -152,6 +176,31 @@ public sealed class SchedulerService : IAsyncDisposable
     {
         NextReminder = _armedOccurrence;
         NextReminderChanged?.Invoke(NextReminder);
+    }
+
+    private static string FormatEntryLog(
+        ReminderWindowEntryReason reason,
+        DateTimeOffset armed,
+        DateTimeOffset dayShutdown)
+    {
+        var shutdownText = $"{dayShutdown:yyyy-MM-dd HH:mm}";
+        return reason switch
+        {
+            ReminderWindowEntryReason.Scheduled =>
+                $"Reminder window started: {armed:yyyy-MM-dd HH:mm}, shutdown scheduled for {ShutdownPolicy.FixedShutdownTime:HH:mm}",
+
+            ReminderWindowEntryReason.Startup =>
+                $"Reminder window entered on startup: shutdown scheduled for {shutdownText}",
+
+            ReminderWindowEntryReason.PlanUpdate =>
+                $"Reminder window entered after plan update: shutdown scheduled for {shutdownText}",
+
+            ReminderWindowEntryReason.TimeAdvance =>
+                $"Reminder window entered after time advance: shutdown scheduled for {shutdownText}",
+
+            _ =>
+                $"Reminder window entered: shutdown scheduled for {shutdownText}"
+        };
     }
 
     // ── Private: main loop ───────────────────────────────────────
@@ -171,11 +220,13 @@ public sealed class SchedulerService : IAsyncDisposable
 
             DateTimeOffset? armed;
             bool enabled;
+            ReminderWindowEntryReason pendingReason;
 
             lock (_lock)
             {
                 enabled = _plan.Enabled;
                 armed = _armedOccurrence;
+                pendingReason = _pendingEntryReason;
             }
 
             if (!enabled)
@@ -187,7 +238,7 @@ public sealed class SchedulerService : IAsyncDisposable
                 {
                     if (_plan.Enabled && _armedOccurrence is null)
                     {
-                        _armedOccurrence = ComputeArmedOccurrence();
+                        _armedOccurrence = ComputeArmedOccurrence(ReminderWindowEntryReason.Startup);
                         SyncNextReminder();
                     }
                 }
@@ -223,6 +274,7 @@ public sealed class SchedulerService : IAsyncDisposable
                 {
                     if (_armedOccurrence == armed.Value)
                     {
+                        _pendingEntryReason = ReminderWindowEntryReason.Scheduled;
                         _armedOccurrence = armed.Value.AddDays(1);
                         SyncNextReminder();
                     }
@@ -230,19 +282,16 @@ public sealed class SchedulerService : IAsyncDisposable
                 continue;
             }
 
-            // Enter reminder window exactly once for this occurrence.
-            var coldStartEntry = now > armed.Value;
-            if (coldStartEntry)
+            // Resolve entry reason without claiming "resume" (no PowerModeChanged signal).
+            var reason = pendingReason;
+            if (reason == ReminderWindowEntryReason.Scheduled
+                && now > armed.Value + ScheduledSkew)
             {
-                AppLogger.Info(
-                    $"Reminder window entered on startup/resume: " +
-                    $"shutdown scheduled for {dayShutdown:yyyy-MM-dd HH:mm}");
-            }
-            else
-            {
-                AppLogger.Info($"Reminder window started: {armed.Value:yyyy-MM-dd HH:mm}");
+                reason = ReminderWindowEntryReason.TimeAdvance;
             }
 
+            AppLogger.Info(FormatEntryLog(reason, armed.Value, dayShutdown));
+            LastEntryReason = reason;
             _lastReminderOccurrence = armed.Value;
 
             try
@@ -258,6 +307,7 @@ public sealed class SchedulerService : IAsyncDisposable
             {
                 if (_armedOccurrence == armed.Value)
                 {
+                    _pendingEntryReason = ReminderWindowEntryReason.Scheduled;
                     _armedOccurrence = armed.Value.AddDays(1);
                     SyncNextReminder();
                 }

@@ -555,4 +555,136 @@ public class SchedulerServiceTests
 
         Assert.Equal(D(2026, 8, 7, 18, 0), scheduler.NextReminder!.Value);
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // M3.5.1 — Entry reason / logging semantics
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Regression: normal on-time entry must be Scheduled, never Startup/TimeAdvance.
+    /// Mirrors the real bug: ReminderStart=16:59 while app has been running.
+    /// </summary>
+    [Fact]
+    public async Task EntryReason_Scheduled_NotMisLabeledAsStartup()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 16, 58) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
+
+        scheduler.UpdatePlan(DefaultPlan(hour: 16, minute: 59));
+        scheduler.Start();
+
+        await clock.AdvanceToAsync(D(2026, 8, 6, 16, 59, 0));
+        await scheduler.StopAsync();
+
+        Assert.Equal(1, count);
+        Assert.Equal(ReminderWindowEntryReason.Scheduled, scheduler.LastEntryReason);
+    }
+
+    [Fact]
+    public async Task EntryReason_Scheduled_AtExactSecond_StillScheduled()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 17, 59) };
+        var scheduler = new SchedulerService(clock);
+        scheduler.ReminderWindowStarted += _ => { };
+
+        scheduler.UpdatePlan(DefaultPlan());
+        scheduler.Start();
+        await clock.AdvanceToAsync(D(2026, 8, 6, 18, 0, 0));
+        await scheduler.StopAsync();
+
+        Assert.Equal(ReminderWindowEntryReason.Scheduled, scheduler.LastEntryReason);
+    }
+
+    [Fact]
+    public async Task EntryReason_Scheduled_OneSecondPast_StillScheduled()
+    {
+        // 1s poll skew must not become TimeAdvance / Startup.
+        var clock = new FakeClock { Now = D(2026, 8, 6, 17, 59) };
+        var scheduler = new SchedulerService(clock);
+        scheduler.ReminderWindowStarted += _ => { };
+
+        scheduler.UpdatePlan(DefaultPlan());
+        scheduler.Start();
+        await clock.AdvanceToAsync(D(2026, 8, 6, 18, 0, 1));
+        await scheduler.StopAsync();
+
+        Assert.Equal(ReminderWindowEntryReason.Scheduled, scheduler.LastEntryReason);
+    }
+
+    [Fact]
+    public async Task EntryReason_Startup_InsideWindow()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 20, 30) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
+
+        scheduler.UpdatePlan(DefaultPlan());
+        scheduler.Start();
+        await clock.AdvanceToAsync(D(2026, 8, 6, 20, 30, 1));
+        await scheduler.StopAsync();
+
+        Assert.Equal(1, count);
+        Assert.Equal(ReminderWindowEntryReason.Startup, scheduler.LastEntryReason);
+    }
+
+    [Fact]
+    public async Task EntryReason_StartupAfter2200_DoesNotEnter()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 22, 10) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
+
+        scheduler.UpdatePlan(DefaultPlan());
+        scheduler.Start();
+        await clock.AdvanceToAsync(D(2026, 8, 6, 22, 11));
+        await scheduler.StopAsync();
+
+        Assert.Equal(0, count);
+        Assert.Null(scheduler.LastEntryReason);
+        Assert.Equal(D(2026, 8, 7, 18, 0), scheduler.NextReminder!.Value);
+    }
+
+    [Fact]
+    public async Task EntryReason_PlanUpdate_InsideWindow_NotStartup()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 20, 0) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
+
+        scheduler.UpdatePlan(DefaultPlan(enabled: false));
+        scheduler.Start();
+        await clock.AdvanceToAsync(D(2026, 8, 6, 20, 0, 1));
+        Assert.Equal(0, count);
+
+        scheduler.UpdatePlan(DefaultPlan(enabled: true));
+        await clock.AdvanceToAsync(D(2026, 8, 6, 20, 0, 2));
+        await scheduler.StopAsync();
+
+        Assert.Equal(1, count);
+        Assert.Equal(ReminderWindowEntryReason.PlanUpdate, scheduler.LastEntryReason);
+    }
+
+    [Fact]
+    public async Task EntryReason_TimeAdvance_JumpIntoWindow_NotResumeClaim()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 17, 50) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
+
+        scheduler.UpdatePlan(DefaultPlan());
+        scheduler.Start();
+
+        // Large clock jump past ReminderStart while still before 22:00.
+        await clock.AdvanceToAsync(D(2026, 8, 6, 20, 0));
+        await scheduler.StopAsync();
+
+        Assert.Equal(1, count);
+        Assert.Equal(ReminderWindowEntryReason.TimeAdvance, scheduler.LastEntryReason);
+    }
 }
