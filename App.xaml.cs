@@ -63,8 +63,8 @@ public partial class App : Application
         var box = new Wpf.Ui.Controls.MessageBox
         {
             Title = "ShutdownGuard",
-            Content = "ShutdownGuard is already running. Check the system tray.",
-            CloseButtonText = "OK",
+            Content = "ShutdownGuard 已在运行，请检查系统托盘。",
+            CloseButtonText = "确定",
             IsPrimaryButtonEnabled = false,
             IsSecondaryButtonEnabled = false
         };
@@ -80,9 +80,9 @@ public partial class App : Application
         {
             var box = new Wpf.Ui.Controls.MessageBox
             {
-                Title = "ShutdownGuard — Startup Error",
-                Content = $"Failed to start ShutdownGuard:\n\n{ex.Message}\n\nDetails written to:\n{LogPath}",
-                CloseButtonText = "OK",
+                Title = "ShutdownGuard — 启动错误",
+                Content = $"启动 ShutdownGuard 失败：\n\n{ex.Message}\n\n详细信息已写入：\n{LogPath}",
+                CloseButtonText = "确定",
                 IsPrimaryButtonEnabled = false,
                 IsSecondaryButtonEnabled = false
             };
@@ -93,8 +93,8 @@ public partial class App : Application
         }
         catch
         {
-            MessageBox.Show($"ShutdownGuard startup error:\n\n{ex.Message}\n\nDetails written to:\n{LogPath}",
-                "ShutdownGuard — Startup Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"ShutdownGuard 启动错误：\n\n{ex.Message}\n\n详细信息已写入：\n{LogPath}",
+                "ShutdownGuard — 启动错误", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -110,9 +110,9 @@ public partial class App : Application
             {
                 var box = new Wpf.Ui.Controls.MessageBox
                 {
-                    Title = $"ShutdownGuard — Error ({source})",
-                    Content = $"{ex?.Message}\n\nDetails written to:\n{LogPath}",
-                    CloseButtonText = "OK",
+                    Title = $"ShutdownGuard — 错误（{source}）",
+                    Content = $"{ex?.Message}\n\n详细信息已写入：\n{LogPath}",
+                    CloseButtonText = "确定",
                     IsPrimaryButtonEnabled = false,
                     IsSecondaryButtonEnabled = false
                 };
@@ -123,8 +123,8 @@ public partial class App : Application
             }
             catch
             {
-                MessageBox.Show($"ShutdownGuard error ({source}):\n\n{ex?.Message}\n\nDetails written to:\n{LogPath}",
-                    "ShutdownGuard — Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"ShutdownGuard 错误（{source}）：\n\n{ex?.Message}\n\n详细信息已写入：\n{LogPath}",
+                    "ShutdownGuard — 错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
         catch { }

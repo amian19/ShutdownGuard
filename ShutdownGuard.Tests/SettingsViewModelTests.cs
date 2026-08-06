@@ -57,7 +57,7 @@ public class SettingsViewModelTests
         vm.Load(config, null);
 
         Assert.False(vm.Enabled);
-        Assert.Equal("Disabled", vm.NextShutdownText);
+        Assert.Equal("无", vm.NextShutdownText);
     }
 
     // ── ToShutdownPlan ───────────────────────────────────────────
@@ -256,14 +256,14 @@ public class SettingsViewModelTests
     public void FormatNextShutdown_Disabled()
     {
         var result = SettingsViewModel.FormatNextShutdown(null, false);
-        Assert.Equal("Disabled", result);
+        Assert.Equal("无", result);
     }
 
     [Fact]
     public void FormatNextShutdown_NullNext_Enabled()
     {
         var result = SettingsViewModel.FormatNextShutdown(null, true);
-        Assert.Equal("Disabled", result);
+        Assert.Equal("无", result);
     }
 
     [Fact]
@@ -274,7 +274,7 @@ public class SettingsViewModelTests
 
         var result = SettingsViewModel.FormatNextShutdown(today, true);
 
-        Assert.StartsWith("Today,", result);
+        Assert.StartsWith("今天", result);
         Assert.Contains("23:00", result);
     }
 
@@ -286,7 +286,7 @@ public class SettingsViewModelTests
 
         var result = SettingsViewModel.FormatNextShutdown(tomorrow, true);
 
-        Assert.StartsWith("Tomorrow,", result);
+        Assert.StartsWith("明天", result);
         Assert.Contains("23:00", result);
     }
 
@@ -297,6 +297,6 @@ public class SettingsViewModelTests
 
         var result = SettingsViewModel.FormatNextShutdown(future, true);
 
-        Assert.Equal("2026-12-25 23:00", result);
+        Assert.Equal("2026年12月25日 23:00", result);
     }
 }

@@ -21,7 +21,7 @@
 
         <!-- Section: Scheduled Shutdown -->
         <StackPanel Grid.Row="0" Margin="0,0,0,16">
-            <TextBlock Text="Scheduled shutdown"
+            <TextBlock Text="定时关机"
                        FontSize="14" FontWeight="SemiBold"
                        Margin="0,0,0,8"/>
             <Grid>
@@ -29,7 +29,7 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="Enable scheduled shutdown"
+                <TextBlock Text="启用定时关机"
                            VerticalAlignment="Center"/>
                 <ui:ToggleSwitch Grid.Column="1"
                                  IsChecked="{Binding Enabled, Mode=TwoWay}"/>
@@ -38,14 +38,15 @@
 
         <!-- Section: Shutdown Time -->
         <StackPanel Grid.Row="1" Margin="0,0,0,16">
-            <TextBlock Text="Shutdown time"
+            <TextBlock Text="关机时间"
                        FontSize="14" FontWeight="SemiBold"
                        Margin="0,0,0,8"/>
             <StackPanel Orientation="Horizontal">
                 <ComboBox x:Name="HourComboBox"
                           Width="72"
                           IsEnabled="{Binding Enabled}"
-                          SelectedItem="{Binding Hour, Mode=TwoWay}"/>
+                          SelectedItem="{Binding Hour, Mode=TwoWay}"
+                          ItemStringFormat="D2"/>
                 <TextBlock Text=" : "
                            FontSize="16" FontWeight="Bold"
                            VerticalAlignment="Center"
@@ -53,13 +54,14 @@
                 <ComboBox x:Name="MinuteComboBox"
                           Width="72"
                           IsEnabled="{Binding Enabled}"
-                          SelectedItem="{Binding Minute, Mode=TwoWay}"/>
+                          SelectedItem="{Binding Minute, Mode=TwoWay}"
+                          ItemStringFormat="D2"/>
             </StackPanel>
         </StackPanel>
 
         <!-- Section: Next Shutdown -->
         <StackPanel Grid.Row="2" Margin="0,0,0,16">
-            <TextBlock Text="Next shutdown"
+            <TextBlock Text="下次关机"
                        FontSize="14" FontWeight="SemiBold"
                        Margin="0,0,0,8"/>
             <TextBlock Text="{Binding NextShutdownText}"
@@ -69,7 +71,7 @@
 
         <!-- Section: Safety -->
         <StackPanel Grid.Row="3" Margin="0,0,0,16">
-            <TextBlock Text="Safety"
+            <TextBlock Text="安全设置"
                        FontSize="14" FontWeight="SemiBold"
                        Margin="0,0,0,8"/>
             <Grid>
@@ -77,18 +79,18 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="Dry Run (safe test mode)"
+                <TextBlock Text="安全测试模式"
                            VerticalAlignment="Center"/>
                 <ui:ToggleSwitch Grid.Column="1"
                                  IsChecked="{Binding DryRun, Mode=TwoWay}"/>
             </Grid>
-            <TextBlock Text="When enabled, shutdown is only logged and will not actually turn off the computer."
+            <TextBlock Text="开启后只模拟关机并记录日志，不会真正关闭电脑。"
                        FontSize="11"
                        Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                        TextWrapping="Wrap"
                        Margin="0,4,0,0"/>
             <TextBlock x:Name="DryRunWarningText"
-                       Text="Warning: Disabling Dry Run will actually shut down Windows at the scheduled time."
+                       Text="警告：关闭安全测试模式后，到达设定时间将真实关闭 Windows。"
                        FontSize="11"
                        Foreground="Orange"
                        TextWrapping="Wrap"
@@ -98,7 +100,7 @@
 
         <!-- Section: System -->
         <StackPanel Grid.Row="4" Margin="0,0,0,16">
-            <TextBlock Text="System"
+            <TextBlock Text="系统设置"
                        FontSize="14" FontWeight="SemiBold"
                        Margin="0,0,0,8"/>
             <Grid>
@@ -106,7 +108,7 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="Start with Windows"
+                <TextBlock Text="开机自动启动"
                            VerticalAlignment="Center"/>
                 <ui:ToggleSwitch Grid.Column="1"
                                  IsChecked="{Binding RunAtStartup, Mode=TwoWay}"/>
@@ -117,12 +119,12 @@
         <StackPanel Grid.Row="6" Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,12,0,0">
-            <Button Content="Cancel"
+            <Button Content="取消"
                     Width="80" Height="32"
                     Margin="0,0,8,0"
                     Click="Cancel_Click"/>
             <ui:Button x:Name="SaveButton"
-                       Content="Save"
+                       Content="保存"
                        Width="80" Height="32"
                        Appearance="Primary"
                        Click="Save_Click"/>

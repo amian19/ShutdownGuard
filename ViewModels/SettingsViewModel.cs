@@ -15,7 +15,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private int _minute;
     private bool _dryRun;
     private bool _runAtStartup;
-    private string _nextShutdownText = "Disabled";
+    private string _nextShutdownText = "无";
 
     public bool Enabled
     {
@@ -102,18 +102,18 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     public static string FormatNextShutdown(DateTimeOffset? next, bool enabled)
     {
         if (!enabled || next is null)
-            return "Disabled";
+            return "无";
 
         var now = DateTimeOffset.Now;
         var nextVal = next.Value;
 
         if (nextVal.Date == now.Date)
-            return $"Today, {nextVal:HH:mm}";
+            return $"今天 {nextVal:HH:mm}";
 
         if (nextVal.Date == now.Date.AddDays(1))
-            return $"Tomorrow, {nextVal:HH:mm}";
+            return $"明天 {nextVal:HH:mm}";
 
-        return $"{nextVal:yyyy-MM-dd HH:mm}";
+        return $"{nextVal:yyyy年M月d日 HH:mm}";
     }
 
     private void OnPropertyChanged([CallerMemberName] string? name = null)

@@ -68,8 +68,8 @@ public partial class SettingsWindow : Window
             {
                 AppLogger.Error($"Autostart update failed: {ex.Message}");
                 MessageBox.Show(
-                    $"Failed to update Windows startup setting:\n{ex.Message}\n\nSettings were not saved.",
-                    "ShutdownGuard — Error",
+                    $"更新 Windows 开机启动设置失败：\n{ex.Message}\n\n设置未保存。",
+                    "ShutdownGuard — 错误",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
                 return; // Abort — nothing persisted
@@ -97,11 +97,11 @@ public partial class SettingsWindow : Window
                 {
                     AppLogger.Error($"Autostart rollback also failed: {rollbackEx.Message}");
                     MessageBox.Show(
-                        $"Failed to save settings.\n\n" +
-                        $"Config save error: {ex.Message}\n" +
-                        $"Startup setting may be inconsistent.\n" +
-                        $"Expected: {(_originalConfig.RunAtStartup ? "enabled" : "disabled")}",
-                        "ShutdownGuard — Error",
+                        $"保存设置失败。\n\n" +
+                        $"配置文件保存错误：{ex.Message}\n" +
+                        $"开机启动设置可能与程序配置不一致。\n" +
+                        $"预期：{(_originalConfig.RunAtStartup ? "已启用" : "已停用")}",
+                        "ShutdownGuard — 错误",
                         MessageBoxButton.OK,
                         MessageBoxImage.Error);
                     return;
@@ -109,8 +109,8 @@ public partial class SettingsWindow : Window
             }
 
             MessageBox.Show(
-                $"Failed to save settings:\n{ex.Message}",
-                "ShutdownGuard — Error",
+                $"保存设置失败：\n{ex.Message}",
+                "ShutdownGuard — 错误",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
             return; // Abort — nothing persisted (registry rolled back if needed)

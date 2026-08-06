@@ -4,6 +4,7 @@ using System.Windows.Media.Imaging;
 using ShutdownGuard.Core;
 using ShutdownGuard.Models;
 using ShutdownGuard.Services;
+using ShutdownGuard.ViewModels;
 using ShutdownGuard.Views;
 using Hardcodet.Wpf.TaskbarNotification;
 using Wpf.Ui.Controls;
@@ -94,13 +95,13 @@ public sealed class TrayApp : IAsyncDisposable
     {
         var next = _scheduler.NextShutdown;
         if (!_config.Shutdown.Enabled)
-            return "ShutdownGuard — Disabled";
+            return "ShutdownGuard — 已停用";
 
         if (next is null)
-            return "ShutdownGuard — Disabled";
+            return "ShutdownGuard — 已停用";
 
-        var dryLabel = _config.Shutdown.DryRun ? " [DryRun]" : "";
-        return $"ShutdownGuard — Next: {next:HH:mm}{dryLabel}";
+        var dryLabel = _config.Shutdown.DryRun ? " [安全测试]" : "";
+        return $"ShutdownGuard — 下次关机: {next:HH:mm}{dryLabel}";
     }
 
     private ContextMenu BuildContextMenu()
@@ -125,14 +126,12 @@ public sealed class TrayApp : IAsyncDisposable
         menu.Items.Add(new Separator());
 
         // Status
-        var statusText = _config.Shutdown.Enabled ? "Enabled" : "Disabled";
-        var nextText = _scheduler.NextShutdown is { } n
-            ? $"Next: {n:yyyy-MM-dd HH:mm}"
-            : "No schedule";
+        var statusText = _config.Shutdown.Enabled ? "已启用" : "已停用";
+        var nextText = SettingsViewModel.FormatNextShutdown(_scheduler.NextShutdown, _config.Shutdown.Enabled);
 
         var statusItem = new MenuItem
         {
-            Header = $"Status: {statusText} — {nextText}",
+            Header = $"状态：{statusText} — {nextText}",
             IsEnabled = false
         };
         menu.Items.Add(statusItem);
@@ -140,7 +139,7 @@ public sealed class TrayApp : IAsyncDisposable
         // Dry Run indicator
         var dryRunItem = new MenuItem
         {
-            Header = _config.Shutdown.DryRun ? "Dry Run: On" : "Dry Run: Off",
+            Header = _config.Shutdown.DryRun ? "安全测试：开启" : "安全测试：关闭",
             IsEnabled = false
         };
         menu.Items.Add(dryRunItem);
@@ -150,7 +149,7 @@ public sealed class TrayApp : IAsyncDisposable
         // Open Settings
         var settingsItem = new MenuItem
         {
-            Header = "Open Settings"
+            Header = "打开设置"
         };
         settingsItem.Click += (_, _) => OpenSettings();
         menu.Items.Add(settingsItem);
@@ -158,7 +157,7 @@ public sealed class TrayApp : IAsyncDisposable
         // Toggle Enable/Disable
         var toggleItem = new MenuItem
         {
-            Header = _config.Shutdown.Enabled ? "Disable scheduled shutdown" : "Enable scheduled shutdown"
+            Header = _config.Shutdown.Enabled ? "停用定时关机" : "启用定时关机"
         };
         toggleItem.Click += (_, _) => ToggleEnabled();
         menu.Items.Add(toggleItem);
@@ -174,7 +173,7 @@ public sealed class TrayApp : IAsyncDisposable
                 Children =
                 {
                     new SymbolIcon { Symbol = SymbolRegular.SignOut24, FontSize = 14, Margin = new Thickness(0, 0, 8, 0) },
-                    new TextBlock { Text = "Exit", VerticalAlignment = VerticalAlignment.Center }
+                    new TextBlock { Text = "退出", VerticalAlignment = VerticalAlignment.Center }
                 }
             }
         };
