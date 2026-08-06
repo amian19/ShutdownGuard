@@ -7,89 +7,67 @@ namespace ShutdownGuard.Tests;
 public class DailyPolicyTests
 {
     private readonly DailyPolicy _policy = new();
-
     private static readonly TimeSpan LocalOffset = DateTimeOffset.Now.Offset;
 
     private static DateTimeOffset D(int year, int month, int day, int hour, int minute, int second = 0)
         => new(year, month, day, hour, minute, second, LocalOffset);
 
-    // ── GetTodayTarget ──────────────────────────────────────────
-
     [Fact]
-    public void GetTodayTarget_Disabled_ReturnsNull()
+    public void GetTodayReminder_Disabled_ReturnsNull()
     {
-        var plan = new ShutdownPlan { Enabled = false, ShutdownTime = new TimeOnly(23, 0) };
-        var now = D(2026, 8, 5, 20, 0);
-
-        var result = _policy.GetTodayTarget(plan, now);
-
-        Assert.Null(result);
+        var plan = new ShutdownPlan { Enabled = false, ReminderStartTime = new TimeOnly(18, 0) };
+        Assert.Null(_policy.GetTodayReminder(plan, D(2026, 8, 6, 10, 0)));
     }
 
     [Fact]
-    public void GetTodayTarget_ReturnsTodayOccurrence()
+    public void GetTodayReminder_ReturnsTodayOccurrence()
     {
-        var plan = new ShutdownPlan { Enabled = true, ShutdownTime = new TimeOnly(23, 0) };
-        var now = D(2026, 8, 5, 20, 0);
+        var plan = new ShutdownPlan { Enabled = true, ReminderStartTime = new TimeOnly(18, 0) };
+        var result = _policy.GetTodayReminder(plan, D(2026, 8, 6, 10, 0));
 
-        var result = _policy.GetTodayTarget(plan, now);
-
-        Assert.NotNull(result);
-        Assert.Equal(D(2026, 8, 5, 23, 0), result.Value);
+        Assert.Equal(D(2026, 8, 6, 18, 0), result);
     }
 
     [Fact]
-    public void GetTodayTarget_EvenAfterTimePassed_StillReturnsToday()
+    public void GetTodayReminder_EvenAfterTimePassed_StillReturnsToday()
     {
-        var plan = new ShutdownPlan { Enabled = true, ShutdownTime = new TimeOnly(23, 0) };
-        var now = D(2026, 8, 5, 23, 30);
+        var plan = new ShutdownPlan { Enabled = true, ReminderStartTime = new TimeOnly(18, 0) };
+        var result = _policy.GetTodayReminder(plan, D(2026, 8, 6, 20, 30));
 
-        var result = _policy.GetTodayTarget(plan, now);
-
-        Assert.NotNull(result);
-        Assert.Equal(D(2026, 8, 5, 23, 0), result.Value);
+        Assert.Equal(D(2026, 8, 6, 18, 0), result);
     }
 
     [Fact]
-    public void GetTodayTarget_AcrossMidnight()
+    public void GetTodayFixedShutdown_Is2200()
     {
-        // At 23:59, "today" is still the current calendar day.
-        // GetTodayTarget always returns today's date + plan time.
-        var plan = new ShutdownPlan { Enabled = true, ShutdownTime = new TimeOnly(0, 1) };
-        var now = D(2026, 8, 5, 23, 59);
+        var plan = new ShutdownPlan { Enabled = true, ReminderStartTime = new TimeOnly(18, 0) };
+        var result = _policy.GetTodayFixedShutdown(plan, D(2026, 8, 6, 10, 0));
 
-        var result = _policy.GetTodayTarget(plan, now);
-
-        Assert.NotNull(result);
-        // Today (Aug 5) at 00:01 — this has already passed,
-        // but GetTodayTarget always returns today's occurrence.
-        // The Scheduler handles the "already passed" logic.
-        Assert.Equal(D(2026, 8, 5, 0, 1), result.Value);
-    }
-
-    // ── GetNextOccurrence (display) ──────────────────────────────
-
-    [Fact]
-    public void GetNextOccurrence_TodayInFuture_ReturnsToday()
-    {
-        var plan = new ShutdownPlan { Enabled = true, ShutdownTime = new TimeOnly(23, 0) };
-        var now = D(2026, 8, 5, 20, 0);
-
-        var result = _policy.GetNextOccurrence(plan, now);
-
-        Assert.NotNull(result);
-        Assert.Equal(D(2026, 8, 5, 23, 0), result.Value);
+        Assert.Equal(D(2026, 8, 6, 22, 0), result);
     }
 
     [Fact]
-    public void GetNextOccurrence_TodayAlreadyPassed_ReturnsTomorrow()
+    public void GetNextReminder_TodayInFuture_ReturnsToday()
     {
-        var plan = new ShutdownPlan { Enabled = true, ShutdownTime = new TimeOnly(23, 0) };
-        var now = D(2026, 8, 5, 23, 30);
+        var plan = new ShutdownPlan { Enabled = true, ReminderStartTime = new TimeOnly(18, 0) };
+        var result = _policy.GetNextReminder(plan, D(2026, 8, 6, 10, 0));
 
-        var result = _policy.GetNextOccurrence(plan, now);
+        Assert.Equal(D(2026, 8, 6, 18, 0), result);
+    }
 
-        Assert.NotNull(result);
-        Assert.Equal(D(2026, 8, 6, 23, 0), result.Value);
+    [Fact]
+    public void GetNextReminder_TodayAlreadyPassed_ReturnsTomorrow()
+    {
+        var plan = new ShutdownPlan { Enabled = true, ReminderStartTime = new TimeOnly(18, 0) };
+        var result = _policy.GetNextReminder(plan, D(2026, 8, 6, 20, 30));
+
+        Assert.Equal(D(2026, 8, 7, 18, 0), result);
+    }
+
+    [Fact]
+    public void FixedShutdownTime_IsProductConstant()
+    {
+        Assert.Equal(new TimeOnly(22, 0), ShutdownPolicy.FixedShutdownTime);
+        Assert.Equal(new TimeOnly(18, 0), ShutdownPolicy.DefaultReminderStartTime);
     }
 }

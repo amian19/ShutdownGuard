@@ -3,82 +3,62 @@ using ShutdownGuard.Models;
 
 namespace ShutdownGuard.Services;
 
+/// <summary>
+/// Manages daily reminder-window entry. Does not execute shutdown.
+/// Final shutdown at 22:00 is M4 responsibility.
+/// </summary>
 public sealed class SchedulerService : IAsyncDisposable
 {
     private readonly DailyPolicy _policy = new();
     private readonly IClock _clock;
     private readonly object _lock = new();
 
-    private IShutdownExecutor _executor;
     private ShutdownPlan _plan = new();
     private CancellationTokenSource? _cts;
     private Task? _loopTask;
 
     /// <summary>
-    /// The occurrence that the scheduler is currently committed to waiting for and executing.
-    /// This is the core semantic anchor:
-    /// - Set at Start() time based on plan + current time
-    /// - Checked each tick; when now >= _armedOccurrence, execute exactly once
-    /// - Advanced to the next day after execution
-    /// - Set to null when disabled
-    ///
-    /// Cold start safety: if the app starts after today's target time,
-    /// _armedOccurrence is set to tomorrow — no catch-up execution.
+    /// The reminder-start occurrence the scheduler is committed to.
+    /// When now reaches this instant (and the day's fixed shutdown has not passed),
+    /// ReminderWindowStarted fires exactly once, then advances to tomorrow.
     /// </summary>
     private DateTimeOffset? _armedOccurrence;
 
     /// <summary>
-    /// Tracks the last occurrence that was actually executed,
-    /// purely as a safety net against duplicate execution.
+    /// Last reminder occurrence that already entered the window (dedupe).
     /// </summary>
-    private DateTimeOffset? _lastExecutedOccurrence;
+    private DateTimeOffset? _lastReminderOccurrence;
 
-    public event Action<DateTimeOffset?>? NextShutdownChanged;
+    public event Action<DateTimeOffset>? ReminderWindowStarted;
+    public event Action<DateTimeOffset?>? NextReminderChanged;
 
-    public DateTimeOffset? NextShutdown { get; private set; }
+    public DateTimeOffset? NextReminder { get; private set; }
     public bool IsRunning => _loopTask is { IsCompleted: false };
 
-    public SchedulerService(IClock clock, IShutdownExecutor executor)
+    public SchedulerService(IClock clock)
     {
         _clock = clock;
-        _executor = executor;
     }
 
     // ── Plan update ──────────────────────────────────────────────
 
     /// <summary>
-    /// Updates the plan at runtime. Re-arms the occurrence based on the new plan:
-    /// - If disabled → clears armed occurrence.
-    /// - If today's target is in the future → arms today's target.
-    /// - If today's target has passed → arms tomorrow's target (no catch-up).
-    /// This is always a user-initiated change, never a missed-occurrence catch-up.
+    /// Updates the plan at runtime and re-arms the next reminder occurrence.
+    /// If currently inside today's reminder window and today's reminder has not
+    /// yet fired, arms today's (past) reminder so the loop enters immediately.
     /// </summary>
     public void UpdatePlan(ShutdownPlan plan)
     {
         lock (_lock)
         {
-            // Defensive copy: don't hold a reference to an external mutable object.
-            // This prevents callers from mutating the plan and bypassing UpdatePlan().
             _plan = new ShutdownPlan
             {
                 Enabled = plan.Enabled,
-                ShutdownTime = plan.ShutdownTime,
+                ReminderStartTime = plan.ReminderStartTime,
                 DryRun = plan.DryRun
             };
             _armedOccurrence = ComputeArmedOccurrence();
-            SyncNextShutdown();
-        }
-    }
-
-    /// <summary>
-    /// Replaces the executor at runtime (e.g. DryRun on/off switch).
-    /// Thread-safe; does not start a second scheduler.
-    /// </summary>
-    public void UpdateExecutor(IShutdownExecutor executor)
-    {
-        lock (_lock)
-        {
-            _executor = executor;
+            SyncNextReminder();
         }
     }
 
@@ -90,10 +70,8 @@ public sealed class SchedulerService : IAsyncDisposable
         {
             if (IsRunning) return;
 
-            // Arm the occurrence based on current plan + time.
-            // Cold start safety: if now > today's target, arms tomorrow.
             _armedOccurrence = ComputeArmedOccurrence();
-            SyncNextShutdown();
+            SyncNextReminder();
 
             _cts = new CancellationTokenSource();
             _loopTask = RunLoopAsync(_cts.Token);
@@ -133,41 +111,47 @@ public sealed class SchedulerService : IAsyncDisposable
     // ── Private: occurrence computation ──────────────────────────
 
     /// <summary>
-    /// Computes the occurrence to arm, based on the current plan and time.
-    /// Rule:
-    ///   If disabled → null.
-    ///   If today's target is in the future → today's target.
-    ///   If today's target has passed → tomorrow's target.
-    /// This is the single place that decides what the scheduler commits to.
+    /// Arms the next reminder-start occurrence:
+    /// - Disabled → null
+    /// - Before ReminderStart today → today's ReminderStart
+    /// - Inside [ReminderStart, 22:00) and not yet fired → today's ReminderStart (enter now)
+    /// - At/after 22:00 → tomorrow's ReminderStart (no catch-up)
     /// </summary>
     private DateTimeOffset? ComputeArmedOccurrence()
     {
         if (!_plan.Enabled)
             return null;
 
-        var todayTarget = _policy.GetTodayTarget(_plan, _clock.Now);
-        if (todayTarget is null)
+        var todayReminder = _policy.GetTodayReminder(_plan, _clock.Now);
+        if (todayReminder is null)
             return null;
 
-        if (todayTarget.Value >= _clock.Now)
+        var now = _clock.Now;
+        var todayShutdownDto = new DateTimeOffset(
+            todayReminder.Value.Year, todayReminder.Value.Month, todayReminder.Value.Day,
+            ShutdownPolicy.FixedShutdownTime.Hour, ShutdownPolicy.FixedShutdownTime.Minute, 0,
+            todayReminder.Value.Offset);
+
+        if (now < todayReminder.Value)
+            return todayReminder;
+
+        if (now < todayShutdownDto)
         {
-            // Today's target is still in the future — arm it.
-            return todayTarget;
+            // Inside reminder window — arm today's start so the loop can enter once.
+            if (_lastReminderOccurrence == todayReminder.Value)
+                return todayReminder.Value.AddDays(1);
+
+            return todayReminder;
         }
-        else
-        {
-            // Today's target has passed — arm tomorrow's.
-            return todayTarget.Value.AddDays(1);
-        }
+
+        // Past fixed shutdown — wait for tomorrow (never catch up shutdown or reminder).
+        return todayReminder.Value.AddDays(1);
     }
 
-    /// <summary>
-    /// Syncs NextShutdown to _armedOccurrence for UI display.
-    /// </summary>
-    private void SyncNextShutdown()
+    private void SyncNextReminder()
     {
-        NextShutdown = _armedOccurrence;
-        NextShutdownChanged?.Invoke(NextShutdown);
+        NextReminder = _armedOccurrence;
+        NextReminderChanged?.Invoke(NextReminder);
     }
 
     // ── Private: main loop ───────────────────────────────────────
@@ -186,14 +170,12 @@ public sealed class SchedulerService : IAsyncDisposable
             }
 
             DateTimeOffset? armed;
-            IShutdownExecutor executor;
             bool enabled;
 
             lock (_lock)
             {
                 enabled = _plan.Enabled;
                 armed = _armedOccurrence;
-                executor = _executor;
             }
 
             if (!enabled)
@@ -201,14 +183,12 @@ public sealed class SchedulerService : IAsyncDisposable
 
             if (armed is null)
             {
-                // Not armed — try to arm the next future occurrence.
                 lock (_lock)
                 {
-                    // Re-check under lock in case state changed
                     if (_plan.Enabled && _armedOccurrence is null)
                     {
                         _armedOccurrence = ComputeArmedOccurrence();
-                        SyncNextShutdown();
+                        SyncNextReminder();
                     }
                 }
                 continue;
@@ -216,39 +196,71 @@ public sealed class SchedulerService : IAsyncDisposable
 
             var now = _clock.Now;
 
-            // Not yet time for the armed occurrence
             if (now < armed.Value)
                 continue;
 
-            // Safety net: same occurrence already executed
-            if (_lastExecutedOccurrence == armed.Value)
+            if (_lastReminderOccurrence == armed.Value)
                 continue;
 
-            // ── Execute ──
-            AppLogger.Info($"Shutdown occurrence reached: {armed.Value:yyyy-MM-dd HH:mm:ss zzz}");
-            _lastExecutedOccurrence = armed.Value;
+            // Window end for the armed day's plan.
+            var dayShutdown = new DateTimeOffset(
+                armed.Value.Year, armed.Value.Month, armed.Value.Day,
+                ShutdownPolicy.FixedShutdownTime.Hour,
+                ShutdownPolicy.FixedShutdownTime.Minute,
+                0,
+                armed.Value.Offset);
+
+            if (now >= dayShutdown)
+            {
+                // Slept past the entire reminder window — skip today, no reminder, no shutdown.
+                AppLogger.Info(
+                    $"Reminder window missed (past {ShutdownPolicy.FixedShutdownTime:HH:mm}): " +
+                    $"{armed.Value:yyyy-MM-dd HH:mm:ss zzz}");
+
+                _lastReminderOccurrence = armed.Value;
+
+                lock (_lock)
+                {
+                    if (_armedOccurrence == armed.Value)
+                    {
+                        _armedOccurrence = armed.Value.AddDays(1);
+                        SyncNextReminder();
+                    }
+                }
+                continue;
+            }
+
+            // Enter reminder window exactly once for this occurrence.
+            var coldStartEntry = now > armed.Value;
+            if (coldStartEntry)
+            {
+                AppLogger.Info(
+                    $"Reminder window entered on startup/resume: " +
+                    $"shutdown scheduled for {dayShutdown:yyyy-MM-dd HH:mm}");
+            }
+            else
+            {
+                AppLogger.Info($"Reminder window started: {armed.Value:yyyy-MM-dd HH:mm}");
+            }
+
+            _lastReminderOccurrence = armed.Value;
 
             try
             {
-                await executor.ExecuteAsync(cancellationToken);
+                ReminderWindowStarted?.Invoke(armed.Value);
             }
             catch (Exception ex)
             {
-                AppLogger.Error($"Shutdown execution failed for {armed.Value:yyyy-MM-dd HH:mm:ss zzz}: {ex.Message}");
-                // Marked as executed — will not retry this occurrence.
-                // Continue to advance to tomorrow's occurrence.
+                AppLogger.Error($"ReminderWindowStarted handler failed: {ex.Message}");
             }
 
-            // Advance to the next day's occurrence
             lock (_lock)
             {
                 if (_armedOccurrence == armed.Value)
                 {
                     _armedOccurrence = armed.Value.AddDays(1);
-                    SyncNextShutdown();
+                    SyncNextReminder();
                 }
-                // If _armedOccurrence changed during execution (e.g. UpdatePlan),
-                // respect the new value — don't overwrite.
             }
         }
     }

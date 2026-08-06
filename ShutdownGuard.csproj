@@ -40,4 +40,8 @@
     <None Remove="ShutdownGuard.Tests\**" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="ShutdownGuard.Tests" />
+  </ItemGroup>
+
 </Project>

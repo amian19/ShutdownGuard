@@ -12,993 +12,547 @@ public class SchedulerServiceTests
     private static DateTimeOffset D(int year, int month, int day, int hour, int minute, int second = 0)
         => new(year, month, day, hour, minute, second, LocalOffset);
 
-    // ══════════════════════════════════════════════════════════════
-    // M2.5 Tests (kept, should still pass)
-    // ══════════════════════════════════════════════════════════════
+    private static ShutdownPlan DefaultPlan(bool enabled = true, int hour = 18, int minute = 0)
+        => new()
+        {
+            Enabled = enabled,
+            ReminderStartTime = new TimeOnly(hour, minute),
+            DryRun = true
+        };
 
-    // ── Invariant A: Single occurrence executes only once ────────
+    // ── Default reminder ─────────────────────────────────────────
 
     [Fact]
-    public async Task SingleOccurrence_ExecutesOnlyOnce()
+    public void DefaultReminder_Is1800()
     {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59, 58) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
+        var clock = new FakeClock { Now = D(2026, 8, 6, 10, 0) };
+        var scheduler = new SchedulerService(clock);
+        scheduler.UpdatePlan(DefaultPlan());
 
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
-        scheduler.Start();
-
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 0));
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 1));
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 2));
-
-        await scheduler.StopAsync();
-
-        Assert.Equal(1, executor.ExecuteCount);
+        Assert.Equal(D(2026, 8, 6, 18, 0), scheduler.NextReminder!.Value);
     }
 
-    // ── Invariant A extended ─────────────────────────────────────
+    // ── Normal reminder ──────────────────────────────────────────
 
     [Fact]
-    public async Task SingleOccurrence_HundredTicks_StillOneExecution()
+    public async Task NormalReminder_FiresOnceAtStart()
     {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59, 59) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
+        var clock = new FakeClock { Now = D(2026, 8, 6, 17, 59) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        DateTimeOffset? firedAt = null;
+        scheduler.ReminderWindowStarted += o => { count++; firedAt = o; };
 
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
+        scheduler.UpdatePlan(DefaultPlan());
         scheduler.Start();
 
-        for (int i = 0; i < 20; i++)
-        {
-            await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, i % 60));
-        }
+        await clock.AdvanceToAsync(D(2026, 8, 6, 17, 59, 30));
+        Assert.Equal(0, count);
 
+        await clock.AdvanceToAsync(D(2026, 8, 6, 18, 0, 0));
         await scheduler.StopAsync();
 
-        Assert.Equal(1, executor.ExecuteCount);
+        Assert.Equal(1, count);
+        Assert.Equal(D(2026, 8, 6, 18, 0), firedAt);
     }
 
-    // ── Missed occurrence (sleep/resume) ─────────────────────────
+    // ── No duplicate ─────────────────────────────────────────────
 
     [Fact]
-    public async Task MissedOccurrence_ExecutesOnceWhenResumed()
+    public async Task SameDay_NoDuplicateReminder()
     {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
+        var clock = new FakeClock { Now = D(2026, 8, 6, 17, 59) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
 
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
+        scheduler.UpdatePlan(DefaultPlan());
         scheduler.Start();
 
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 5, 0));
-
+        await clock.AdvanceToAsync(D(2026, 8, 6, 18, 0));
+        await clock.AdvanceToAsync(D(2026, 8, 6, 18, 1));
+        await clock.AdvanceToAsync(D(2026, 8, 6, 19, 0));
         await scheduler.StopAsync();
 
-        Assert.Equal(1, executor.ExecuteCount);
+        Assert.Equal(1, count);
     }
 
-    // ── Same occurrence, no duplicate ────────────────────────────
+    // ── Cold start inside reminder window ────────────────────────
 
     [Fact]
-    public async Task SameOccurrence_MultipleTicks_NoDuplicate()
+    public async Task ColdStartInsideWindow_EntersOnce()
     {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
+        var clock = new FakeClock { Now = D(2026, 8, 6, 20, 30) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
 
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
+        scheduler.UpdatePlan(DefaultPlan());
         scheduler.Start();
 
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 5, 0));
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 6, 0));
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 10, 0));
-
+        await clock.AdvanceToAsync(D(2026, 8, 6, 20, 30, 1));
         await scheduler.StopAsync();
 
-        Assert.Equal(1, executor.ExecuteCount);
+        Assert.Equal(1, count);
+        Assert.Equal(D(2026, 8, 7, 18, 0), scheduler.NextReminder!.Value);
     }
 
-    // ── Next day executes again ──────────────────────────────────
+    // ── Cold start after shutdown time ───────────────────────────
 
     [Fact]
-    public async Task NextDay_ExecutesAgain()
+    public async Task ColdStartAfterShutdown_NoCatchUp()
     {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
+        var clock = new FakeClock { Now = D(2026, 8, 6, 22, 10) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
 
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
+        scheduler.UpdatePlan(DefaultPlan());
         scheduler.Start();
 
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0));
-        Assert.Equal(1, executor.ExecuteCount);
+        await clock.AdvanceToAsync(D(2026, 8, 6, 22, 11));
+        await clock.AdvanceToAsync(D(2026, 8, 6, 22, 30));
+        await scheduler.StopAsync();
+
+        Assert.Equal(0, count);
+        Assert.Equal(D(2026, 8, 7, 18, 0), scheduler.NextReminder!.Value);
+    }
+
+    // ── Cold start before reminder ───────────────────────────────
+
+    [Fact]
+    public async Task ColdStartBeforeReminder_WaitsForToday()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 17, 0) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
+
+        scheduler.UpdatePlan(DefaultPlan());
+        scheduler.Start();
+
+        Assert.Equal(D(2026, 8, 6, 18, 0), scheduler.NextReminder!.Value);
+
+        await clock.AdvanceToAsync(D(2026, 8, 6, 17, 30));
+        Assert.Equal(0, count);
+
+        await clock.AdvanceToAsync(D(2026, 8, 6, 18, 0));
+        await scheduler.StopAsync();
+
+        Assert.Equal(1, count);
+    }
+
+    // ── Sleep / resume inside window ─────────────────────────────
+
+    [Fact]
+    public async Task SleepResumeInsideWindow_EntersOnce()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 17, 50) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
+
+        scheduler.UpdatePlan(DefaultPlan());
+        scheduler.Start();
+
+        // Sleep past 18:00, resume at 20:00 — still in [18:00, 22:00)
+        await clock.AdvanceToAsync(D(2026, 8, 6, 20, 0));
+        await scheduler.StopAsync();
+
+        Assert.Equal(1, count);
+    }
+
+    // ── Sleep / resume after 22:00 ───────────────────────────────
+
+    [Fact]
+    public async Task SleepResumeAfterShutdown_SkipsToday()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 17, 50) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
+
+        scheduler.UpdatePlan(DefaultPlan());
+        scheduler.Start();
 
         await clock.AdvanceToAsync(D(2026, 8, 6, 23, 0));
-
         await scheduler.StopAsync();
 
-        Assert.Equal(2, executor.ExecuteCount);
+        Assert.Equal(0, count);
+        Assert.Equal(D(2026, 8, 7, 18, 0), scheduler.NextReminder!.Value);
     }
 
-    // ── Disabled before trigger ──────────────────────────────────
+    // ── Next day ─────────────────────────────────────────────────
 
     [Fact]
-    public async Task DisabledBeforeTrigger_DoesNotExecute()
+    public async Task NextDay_ReminderFiresAgain()
     {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
+        var clock = new FakeClock { Now = D(2026, 8, 6, 17, 59) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
 
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
+        scheduler.UpdatePlan(DefaultPlan());
         scheduler.Start();
 
-        clock.Now = D(2026, 8, 5, 22, 59, 30);
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = false,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
+        await clock.AdvanceToAsync(D(2026, 8, 6, 18, 0));
+        Assert.Equal(1, count);
 
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 5));
-
+        await clock.AdvanceToAsync(D(2026, 8, 7, 18, 0));
         await scheduler.StopAsync();
 
-        Assert.Equal(0, executor.ExecuteCount);
+        Assert.Equal(2, count);
     }
 
-    // ── Enabled after today's time ───────────────────────────────
+    // ── Disabled ─────────────────────────────────────────────────
 
     [Fact]
-    public async Task EnabledAfterTargetTime_DoesNotExecuteToday()
+    public async Task Disabled_NoReminder()
     {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 23, 5) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
+        var clock = new FakeClock { Now = D(2026, 8, 6, 17, 59) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
 
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
+        scheduler.UpdatePlan(DefaultPlan(enabled: false));
         scheduler.Start();
 
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 6));
-
+        await clock.AdvanceToAsync(D(2026, 8, 6, 18, 0));
         await scheduler.StopAsync();
 
-        Assert.Equal(0, executor.ExecuteCount);
-        Assert.Equal(D(2026, 8, 6, 23, 0), scheduler.NextShutdown!.Value);
+        Assert.Equal(0, count);
+        Assert.Null(scheduler.NextReminder);
     }
 
-    // ── Plan update: change time forward ─────────────────────────
+    // ── Reenable within window ───────────────────────────────────
 
     [Fact]
-    public async Task UpdatePlan_ChangeTimeForward_UpdatesNextOccurrence()
+    public async Task ReenableWithinWindow_EntersImmediately()
     {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 20, 0) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
+        var clock = new FakeClock { Now = D(2026, 8, 6, 20, 0) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
 
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
-        Assert.Equal(D(2026, 8, 5, 23, 0), scheduler.NextShutdown!.Value);
-
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(21, 0),
-            DryRun = true
-        });
-
-        Assert.Equal(D(2026, 8, 5, 21, 0), scheduler.NextShutdown!.Value);
-    }
-
-    // ── Plan update: change time to past ─────────────────────────
-
-    [Fact]
-    public async Task UpdatePlan_ChangeTimeToPast_SchedulesTomorrow()
-    {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 20, 0) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
-
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(19, 0),
-            DryRun = true
-        });
-
-        Assert.Equal(D(2026, 8, 6, 19, 0), scheduler.NextShutdown!.Value);
-    }
-
-    // ── Plan update: change time to past, verify no execution ────
-
-    [Fact]
-    public async Task UpdatePlan_ChangeTimeToPast_DoesNotExecute()
-    {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 20, 0) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
-
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
+        scheduler.UpdatePlan(DefaultPlan(enabled: false));
         scheduler.Start();
 
-        clock.Now = D(2026, 8, 5, 20, 0, 1);
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(19, 0),
-            DryRun = true
-        });
+        clock.Now = D(2026, 8, 6, 20, 0, 1);
+        scheduler.UpdatePlan(DefaultPlan(enabled: true));
 
-        await clock.AdvanceToAsync(D(2026, 8, 5, 20, 0, 2));
-
+        await clock.AdvanceToAsync(D(2026, 8, 6, 20, 0, 2));
         await scheduler.StopAsync();
 
-        Assert.Equal(0, executor.ExecuteCount);
+        Assert.Equal(1, count);
     }
 
-    // ── Executor switching ───────────────────────────────────────
+    // ── Scheduler never calls executor ───────────────────────────
 
     [Fact]
-    public async Task UpdateExecutor_SwitchesExecutorInPlace()
+    public async Task Scheduler_NeverCallsShutdownExecutor()
     {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59) };
-        var executor1 = new DryRunShutdownExecutor();
-        var executor2 = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor1);
+        // Regression: SchedulerService constructor no longer accepts IShutdownExecutor.
+        // Crossing the whole reminder window must not invoke any executor.
+        var clock = new FakeClock { Now = D(2026, 8, 6, 17, 59) };
+        var scheduler = new SchedulerService(clock);
+        var reminderCount = 0;
+        scheduler.ReminderWindowStarted += _ => reminderCount++;
 
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
+        // Keep an executor nearby to prove it is unused by the scheduler path.
+        var orphanExecutor = new DryRunShutdownExecutor();
 
+        scheduler.UpdatePlan(DefaultPlan());
         scheduler.Start();
 
-        scheduler.UpdateExecutor(executor2);
-
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0));
-
+        await clock.AdvanceToAsync(D(2026, 8, 6, 18, 0));
+        await clock.AdvanceToAsync(D(2026, 8, 6, 20, 0));
+        await clock.AdvanceToAsync(D(2026, 8, 6, 21, 59));
         await scheduler.StopAsync();
 
-        Assert.Equal(0, executor1.ExecuteCount);
-        Assert.Equal(1, executor2.ExecuteCount);
+        Assert.Equal(1, reminderCount);
+        Assert.Equal(0, orphanExecutor.ExecuteCount);
     }
 
-    // ── Disabled does not execute ────────────────────────────────
+    // ── Defensive copy ───────────────────────────────────────────
 
     [Fact]
-    public async Task Disabled_DoesNotExecute()
+    public void UpdatePlan_DefensiveCopy_ModifyingOriginalDoesNotAffectScheduler()
     {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
+        var clock = new FakeClock { Now = D(2026, 8, 6, 10, 0) };
+        var scheduler = new SchedulerService(clock);
 
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = false,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
+        var plan = DefaultPlan(hour: 18);
+        scheduler.UpdatePlan(plan);
 
-        scheduler.Start();
+        plan.Enabled = false;
+        plan.ReminderStartTime = new TimeOnly(12, 0);
 
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 1));
-
-        await scheduler.StopAsync();
-
-        Assert.Equal(0, executor.ExecuteCount);
+        Assert.Equal(D(2026, 8, 6, 18, 0), scheduler.NextReminder!.Value);
     }
 
-    // ── NextShutdown reports correct value ───────────────────────
-
-    [Fact]
-    public void NextShutdown_ReportsCorrectValue()
-    {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 20, 0) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
-
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
-        Assert.NotNull(scheduler.NextShutdown);
-        Assert.Equal(D(2026, 8, 5, 23, 0), scheduler.NextShutdown!.Value);
-    }
-
-    // ── Start is idempotent ──────────────────────────────────────
+    // ── Start idempotent ─────────────────────────────────────────
 
     [Fact]
     public async Task Start_IsIdempotent()
     {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
+        var clock = new FakeClock { Now = D(2026, 8, 6, 17, 59) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
 
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
+        scheduler.UpdatePlan(DefaultPlan());
         scheduler.Start();
-        scheduler.Start(); // Second call should be a no-op
+        scheduler.Start();
         Assert.True(scheduler.IsRunning);
 
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0));
-
+        await clock.AdvanceToAsync(D(2026, 8, 6, 18, 0));
         await scheduler.StopAsync();
 
-        Assert.Equal(1, executor.ExecuteCount);
+        Assert.Equal(1, count);
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // M2.6 Tests — Armed Occurrence Model
-    // ══════════════════════════════════════════════════════════════
+    // ── Event lifecycle safety ───────────────────────────────────
 
-    // ── Test 1: Cold start after target ──────────────────────────
-
-    /// <summary>
-    /// Application cold-starts after the planned shutdown time.
-    /// Must NOT execute today's occurrence — schedule for tomorrow.
-    /// </summary>
     [Fact]
-    public async Task ColdStartAfterTarget_DoesNotExecute()
+    public void NextReminderChanged_FiresDuringUpdatePlan_HandlerMustGuardAgainstNullState()
     {
-        // Simulate: app starts at 23:05, plan is 23:00, Enabled=true
-        var clock = new FakeClock { Now = D(2026, 8, 5, 23, 5) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
+        var clock = new FakeClock { Now = D(2026, 8, 6, 10, 0) };
+        var scheduler = new SchedulerService(clock);
 
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
-        scheduler.Start();
-
-        // Let the scheduler run several ticks
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 6));
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 10));
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 30));
-
-        await scheduler.StopAsync();
-
-        Assert.Equal(0, executor.ExecuteCount);
-        Assert.NotNull(scheduler.NextShutdown);
-        Assert.Equal(D(2026, 8, 6, 23, 0), scheduler.NextShutdown!.Value);
-    }
-
-    // ── Test 2: Reboot after successful shutdown ─────────────────
-
-    /// <summary>
-    /// Scheduler instance A executes at 23:00 and shuts down the machine.
-    /// The user reboots at 23:20 and ShutdownGuard autostarts (instance B).
-    /// Instance B must NOT execute again for the same day.
-    /// </summary>
-    [Fact]
-    public async Task RebootAfterSuccessfulShutdown_DoesNotReExecute()
-    {
-        // ── Instance A: runs before 23:00, executes at 23:00 ──
-        var clockA = new FakeClock { Now = D(2026, 8, 5, 22, 59) };
-        var executorA = new DryRunShutdownExecutor();
-
-        var schedulerA = new SchedulerService(clockA, executorA);
-        schedulerA.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-        schedulerA.Start();
-
-        await clockA.AdvanceToAsync(D(2026, 8, 5, 23, 0));
-        Assert.Equal(1, executorA.ExecuteCount);
-        await schedulerA.StopAsync();
-
-        // ── Instance B: fresh start at 23:20 (post-reboot) ──
-        var clockB = new FakeClock { Now = D(2026, 8, 5, 23, 20) };
-        var executorB = new DryRunShutdownExecutor();
-
-        var schedulerB = new SchedulerService(clockB, executorB);
-        schedulerB.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-        schedulerB.Start();
-
-        await clockB.AdvanceToAsync(D(2026, 8, 5, 23, 21));
-        await clockB.AdvanceToAsync(D(2026, 8, 5, 23, 30));
-
-        await schedulerB.StopAsync();
-
-        Assert.Equal(0, executorB.ExecuteCount);
-        Assert.Equal(D(2026, 8, 6, 23, 0), schedulerB.NextShutdown!.Value);
-    }
-
-    // ── Test 3: Sleep-miss still executes ────────────────────────
-
-    /// <summary>
-    /// Scheduler was already running and armed before the target.
-    /// System sleeps, misses the exact 23:00 moment, resumes at 23:05.
-    /// Must execute once (catch-up for armed occurrence).
-    /// </summary>
-    [Fact]
-    public async Task SleepMiss_StillExecutes()
-    {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
-
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
-        scheduler.Start();
-        // At this point, armed = today 23:00
-
-        // Simulate sleep: clock jumps from 22:59 to 23:05
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 5, 0));
-
-        await scheduler.StopAsync();
-
-        Assert.Equal(1, executor.ExecuteCount);
-    }
-
-    // ── Test 4: Restart after target, no catch-up ────────────────
-
-    /// <summary>
-    /// A fresh SchedulerService instance started after the target time.
-    /// Multiple ticks must still result in zero executions.
-    /// </summary>
-    [Fact]
-    public async Task RestartAfterTarget_NoCatchUp()
-    {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 23, 10) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
-
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
-        scheduler.Start();
-
-        // Multiple ticks — must never execute
-        for (int i = 0; i < 10; i++)
-        {
-            await clock.AdvanceToAsync(D(2026, 8, 5, 23, 10 + i));
-        }
-
-        await scheduler.StopAsync();
-
-        Assert.Equal(0, executor.ExecuteCount);
-    }
-
-    // ── Test 5: Cold start before target, executes normally ──────
-
-    /// <summary>
-    /// App starts at 20:00 with plan 23:00.
-    /// At 23:00, it should execute normally.
-    /// </summary>
-    [Fact]
-    public async Task ColdStartBeforeTarget_ExecutesNormally()
-    {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 20, 0) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
-
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
-        scheduler.Start();
-
-        // NextShutdown should be today 23:00
-        Assert.Equal(D(2026, 8, 5, 23, 0), scheduler.NextShutdown!.Value);
-
-        // Advance to 23:00
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0));
-
-        await scheduler.StopAsync();
-
-        Assert.Equal(1, executor.ExecuteCount);
-    }
-
-    // ── Test 6: Disable clears armed occurrence ──────────────────
-
-    /// <summary>
-    /// When the plan is disabled, the armed occurrence must be cleared.
-    /// Advancing past the original target must not trigger execution.
-    /// </summary>
-    [Fact]
-    public async Task DisableClearsArmedOccurrence()
-    {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 20, 0) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
-
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
-        scheduler.Start();
-
-        // Disable
-        clock.Now = D(2026, 8, 5, 20, 0, 1);
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = false,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
-        // NextShutdown must be null
-        Assert.Null(scheduler.NextShutdown);
-
-        // Advance past 23:00
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 5));
-
-        await scheduler.StopAsync();
-
-        Assert.Equal(0, executor.ExecuteCount);
-    }
-
-    // ── Test 7: Re-enable after target schedules tomorrow ────────
-
-    /// <summary>
-    /// User had scheduler running, disabled it before the target,
-    /// then re-enables after the target time. Must schedule tomorrow.
-    /// </summary>
-    [Fact]
-    public async Task ReenableAfterTarget_SchedulesTomorrow()
-    {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 0) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
-
-        // Start enabled at 22:00, plan 23:00
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
-        scheduler.Start();
-
-        // At 23:00, disable (before execution, or after — either way)
-        clock.Now = D(2026, 8, 5, 23, 0);
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = false,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
-        // At 23:05, re-enable
-        clock.Now = D(2026, 8, 5, 23, 5);
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
-        Assert.Equal(D(2026, 8, 6, 23, 0), scheduler.NextShutdown!.Value);
-
-        // Tick past 23:05 — no execution
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 6));
-
-        await scheduler.StopAsync();
-
-        Assert.Equal(0, executor.ExecuteCount);
-    }
-
-    // ══════════════════════════════════════════════════════════════
-    // M3.1 Tests — Defensive Copy
-    // ══════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Modifying the ShutdownPlan object after passing it to UpdatePlan
-    /// must NOT affect the scheduler's internal state.
-    /// </summary>
-    [Fact]
-    public void UpdatePlan_DefensiveCopy_ModifyingOriginalDoesNotAffectScheduler()
-    {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 20, 0) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
-
-        var plan = new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        };
-
-        scheduler.UpdatePlan(plan);
-
-        // Mutate the original object — must not affect scheduler
-        plan.Enabled = false;
-        plan.ShutdownTime = new TimeOnly(12, 0);
-        plan.DryRun = false;
-
-        // Scheduler must still reflect the original values passed to UpdatePlan
-        Assert.Equal(D(2026, 8, 5, 23, 0), scheduler.NextShutdown!.Value);
-    }
-
-    /// <summary>
-    /// After defensive copy, the scheduler's plan is isolated.
-    /// Calling UpdatePlan again with a different plan works correctly.
-    /// </summary>
-    [Fact]
-    public async Task UpdatePlan_DefensiveCopy_SubsequentUpdateWorks()
-    {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 20, 0) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
-
-        var plan1 = new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        };
-
-        scheduler.UpdatePlan(plan1);
-
-        // Mutate plan1
-        plan1.Enabled = false;
-
-        // Update with plan2
-        var plan2 = new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(21, 0),
-            DryRun = true
-        };
-        scheduler.UpdatePlan(plan2);
-
-        // Must reflect plan2, not plan1
-        Assert.Equal(D(2026, 8, 5, 21, 0), scheduler.NextShutdown!.Value);
-
-        scheduler.Start();
-        await clock.AdvanceToAsync(D(2026, 8, 5, 21, 0));
-        await scheduler.StopAsync();
-
-        Assert.Equal(1, executor.ExecuteCount);
-    }
-
-    // ══════════════════════════════════════════════════════════════
-    // M3.1.1 Tests — Event Handler Lifecycle Safety
-    // ══════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Regression test for the M3.1.1 startup crash:
-    /// Scheduler fires NextShutdownChanged synchronously inside UpdatePlan.
-    /// If the event handler accesses UI objects that haven't been initialized yet,
-    /// it must not crash. This test verifies the lifecycle guard pattern works:
-    /// checking a readiness flag before accessing nullable fields.
-    /// </summary>
-    [Fact]
-    public void NextShutdownChanged_FiresDuringUpdatePlan_HandlerMustGuardAgainstNullState()
-    {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 20, 0) };
-        var scheduler = new SchedulerService(clock, new DryRunShutdownExecutor());
-
-        object? uiObject = null; // Simulates _trayIcon before initialization
+        object? uiObject = null;
         bool handlerCrash = false;
         bool handlerCalled = false;
 
-        scheduler.NextShutdownChanged += next =>
+        scheduler.NextReminderChanged += next =>
         {
             handlerCalled = true;
-            // Simulate the lifecycle guard: check readiness before accessing UI
             if (uiObject is not null)
-            {
-                // Access UI — should not reach here when uiObject is null
                 _ = uiObject.ToString();
-            }
+            _ = next;
         };
 
-        // Act: fire the event (same as UpdatePlan does)
         try
         {
-            scheduler.UpdatePlan(new ShutdownPlan
-            {
-                Enabled = true,
-                ShutdownTime = new TimeOnly(23, 0),
-                DryRun = true
-            });
+            scheduler.UpdatePlan(DefaultPlan());
         }
         catch (NullReferenceException)
         {
             handlerCrash = true;
         }
 
-        Assert.True(handlerCalled, "Event handler should have been invoked");
-        Assert.False(handlerCrash, "Handler must not crash when UI is not yet initialized");
+        Assert.True(handlerCalled);
+        Assert.False(handlerCrash);
     }
 
-    /// <summary>
-    /// After disposal, event handlers should still not crash if events arrive late.
-    /// </summary>
     [Fact]
-    public void NextShutdownChanged_AfterDispose_HandlerMustBeSafe()
+    public void NextReminderChanged_AfterDispose_HandlerMustBeSafe()
     {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 20, 0) };
-        var scheduler = new SchedulerService(clock, new DryRunShutdownExecutor());
+        var clock = new FakeClock { Now = D(2026, 8, 6, 10, 0) };
+        var scheduler = new SchedulerService(clock);
 
         bool disposed = false;
         bool handlerCrash = false;
 
-        scheduler.NextShutdownChanged += _ =>
+        scheduler.NextReminderChanged += _ =>
         {
             if (disposed) return;
-            // Simulate accessing a disposed UI object
             throw new NullReferenceException("Simulated crash");
         };
 
-        // Normal call — would crash but caught
         try
         {
-            scheduler.UpdatePlan(new ShutdownPlan
-            {
-                Enabled = true,
-                ShutdownTime = new TimeOnly(23, 0),
-                DryRun = true
-            });
+            scheduler.UpdatePlan(DefaultPlan());
         }
         catch (NullReferenceException)
         {
             handlerCrash = true;
         }
-        Assert.True(handlerCrash, "Without guard, handler crashes");
+        Assert.True(handlerCrash);
 
-        // After disposal — guard prevents access
         disposed = true;
         handlerCrash = false;
 
         try
         {
-            scheduler.UpdatePlan(new ShutdownPlan
-            {
-                Enabled = false,
-                ShutdownTime = new TimeOnly(23, 0),
-                DryRun = true
-            });
+            scheduler.UpdatePlan(DefaultPlan(enabled: false));
         }
         catch (NullReferenceException)
         {
             handlerCrash = true;
         }
 
-        Assert.False(handlerCrash, "After disposal, handler must not crash");
+        Assert.False(handlerCrash);
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // M3.1.2 Tests — Execution Observability
-    // ══════════════════════════════════════════════════════════════
+    // ── NextReminder advances after entry ────────────────────────
 
-    /// <summary>
-    /// DryRunShutdownExecutor must fire ShutdownTriggered event when executed,
-    /// providing an observable hook for the execution.
-    /// </summary>
     [Fact]
-    public async Task DryRunExecutor_FiresShutdownTriggeredEvent()
+    public async Task NextReminder_AdvancesToTomorrow_AfterWindowEntry()
     {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59, 58) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
+        var clock = new FakeClock { Now = D(2026, 8, 6, 17, 59) };
+        var scheduler = new SchedulerService(clock);
 
-        DateTimeOffset? triggeredAt = null;
-        executor.ShutdownTriggered += dt => triggeredAt = dt;
-
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
+        scheduler.UpdatePlan(DefaultPlan());
         scheduler.Start();
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 0));
+        await clock.AdvanceToAsync(D(2026, 8, 6, 18, 0));
         await scheduler.StopAsync();
 
-        Assert.NotNull(triggeredAt);
-        Assert.Equal(1, executor.ExecuteCount);
-        Assert.NotNull(executor.LastTriggeredAt);
+        Assert.Equal(D(2026, 8, 7, 18, 0), scheduler.NextReminder!.Value);
     }
 
-    /// <summary>
-    /// After execution, NextShutdown must advance to the next day.
-    /// </summary>
-    [Fact]
-    public async Task NextShutdown_AdvancesToNextDay_AfterExecution()
+    // ── IsWithinReminderWindow ───────────────────────────────────
+
+    [Theory]
+    [InlineData(18, 0, true)]
+    [InlineData(20, 30, true)]
+    [InlineData(21, 59, true)]
+    [InlineData(17, 59, false)]
+    [InlineData(22, 0, false)]
+    [InlineData(23, 0, false)]
+    public void IsWithinReminderWindow_MatchesProductRule(int hour, int minute, bool expected)
     {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59, 58) };
-        var executor = new DryRunShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
-
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
-        scheduler.Start();
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 0));
-        await scheduler.StopAsync();
-
-        // NextShutdown should be tomorrow's 23:00
-        Assert.Equal(D(2026, 8, 6, 23, 0), scheduler.NextShutdown!.Value);
+        var plan = DefaultPlan();
+        var now = D(2026, 8, 6, hour, minute);
+        Assert.Equal(expected, ShutdownPolicy.IsWithinReminderWindow(plan, now));
     }
 
-    /// <summary>
-    /// When the executor throws an exception, the scheduler must:
-    /// - Not crash the background loop
-    /// - Not retry the same occurrence
-    /// - Still advance NextShutdown to tomorrow
-    /// </summary>
     [Fact]
-    public async Task ExecutorException_DoesNotCrashLoop_DoesNotRetry_AdvancesNextShutdown()
+    public void IsWithinReminderWindow_Disabled_IsFalse()
     {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59, 58) };
-        var executor = new ThrowingShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
-
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
-
-        scheduler.Start();
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 0));
-
-        // Give the loop time to process the exception and continue
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 2));
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 3));
-
-        await scheduler.StopAsync();
-
-        // Executor was called exactly once (no retry)
-        Assert.Equal(1, executor.ExecuteCount);
-
-        // NextShutdown advanced to tomorrow (loop didn't crash)
-        Assert.Equal(D(2026, 8, 6, 23, 0), scheduler.NextShutdown!.Value);
+        var plan = DefaultPlan(enabled: false);
+        var now = D(2026, 8, 6, 20, 0);
+        Assert.False(ShutdownPolicy.IsWithinReminderWindow(plan, now));
     }
 
-    /// <summary>
-    /// A second occurrence the next day still executes normally
-    /// after a previous executor failure.
-    /// </summary>
+    // ── UpdatePlan time changes ──────────────────────────────────
+
     [Fact]
-    public async Task AfterExecutorException_NextDayOccurrenceStillExecutes()
+    public void UpdatePlan_ChangeReminderForward_UpdatesNext()
     {
-        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59, 58) };
-        var executor = new ThrowingShutdownExecutor();
-        var scheduler = new SchedulerService(clock, executor);
+        var clock = new FakeClock { Now = D(2026, 8, 6, 10, 0) };
+        var scheduler = new SchedulerService(clock);
 
-        scheduler.UpdatePlan(new ShutdownPlan
-        {
-            Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
-            DryRun = true
-        });
+        scheduler.UpdatePlan(DefaultPlan(hour: 18));
+        Assert.Equal(D(2026, 8, 6, 18, 0), scheduler.NextReminder!.Value);
 
+        scheduler.UpdatePlan(DefaultPlan(hour: 20));
+        Assert.Equal(D(2026, 8, 6, 20, 0), scheduler.NextReminder!.Value);
+    }
+
+    [Fact]
+    public void UpdatePlan_ChangeReminderToPastOutsideWindow_SchedulesTomorrow()
+    {
+        // At 21:00, changing reminder to 20:00 is still inside [20:00, 22:00)
+        // so it arms today's 20:00 for immediate entry. Use after 22:00 instead.
+        var clock = new FakeClock { Now = D(2026, 8, 6, 22, 30) };
+        var scheduler = new SchedulerService(clock);
+
+        scheduler.UpdatePlan(DefaultPlan(hour: 18));
+        Assert.Equal(D(2026, 8, 7, 18, 0), scheduler.NextReminder!.Value);
+    }
+
+    [Fact]
+    public async Task DisableClearsArmedOccurrence()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 10, 0) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
+
+        scheduler.UpdatePlan(DefaultPlan());
         scheduler.Start();
 
-        // First execution — throws
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 0));
-        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 1));
+        clock.Now = D(2026, 8, 6, 10, 0, 1);
+        scheduler.UpdatePlan(DefaultPlan(enabled: false));
+        Assert.Null(scheduler.NextReminder);
 
-        // Advance to next day
-        await clock.AdvanceToAsync(D(2026, 8, 6, 22, 59, 58));
-        await clock.AdvanceToAsync(D(2026, 8, 6, 23, 0, 0));
-
+        await clock.AdvanceToAsync(D(2026, 8, 6, 18, 5));
         await scheduler.StopAsync();
 
-        // Both occurrences attempted (each exactly once)
-        Assert.Equal(2, executor.ExecuteCount);
-        Assert.Equal(D(2026, 8, 7, 23, 0), scheduler.NextShutdown!.Value);
+        Assert.Equal(0, count);
     }
 
-    // ── Test helper: executor that always throws ──────────────────
-
-    private sealed class ThrowingShutdownExecutor : IShutdownExecutor
+    [Fact]
+    public async Task ColdStartAtExactly2200_NoReminder()
     {
-        public int ExecuteCount { get; private set; }
+        var clock = new FakeClock { Now = D(2026, 8, 6, 22, 0) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
 
-        public Task ExecuteAsync(CancellationToken cancellationToken = default)
-        {
-            ExecuteCount++;
-            throw new InvalidOperationException("Simulated executor failure");
-        }
+        scheduler.UpdatePlan(DefaultPlan());
+        scheduler.Start();
+        await clock.AdvanceToAsync(D(2026, 8, 6, 22, 0, 1));
+        await scheduler.StopAsync();
+
+        Assert.Equal(0, count);
+        Assert.Equal(D(2026, 8, 7, 18, 0), scheduler.NextReminder!.Value);
+    }
+
+    [Fact]
+    public async Task ColdStartAtExactly1800_EntersWindow()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 18, 0) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
+
+        scheduler.UpdatePlan(DefaultPlan());
+        scheduler.Start();
+        await clock.AdvanceToAsync(D(2026, 8, 6, 18, 0, 1));
+        await scheduler.StopAsync();
+
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
+    public async Task CustomReminder2030_ColdStartAt2100_EntersOnce()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 21, 0) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
+
+        scheduler.UpdatePlan(DefaultPlan(hour: 20, minute: 30));
+        scheduler.Start();
+        await clock.AdvanceToAsync(D(2026, 8, 6, 21, 0, 1));
+        await scheduler.StopAsync();
+
+        Assert.Equal(1, count);
+        Assert.Equal(D(2026, 8, 7, 20, 30), scheduler.NextReminder!.Value);
+    }
+
+    [Fact]
+    public async Task HundredTicksInsideWindow_StillOneReminder()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 17, 59, 59) };
+        var scheduler = new SchedulerService(clock);
+        var count = 0;
+        scheduler.ReminderWindowStarted += _ => count++;
+
+        scheduler.UpdatePlan(DefaultPlan());
+        scheduler.Start();
+
+        for (int i = 0; i < 20; i++)
+            await clock.AdvanceToAsync(D(2026, 8, 6, 18, 0, i % 60));
+
+        await scheduler.StopAsync();
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
+    public async Task ReminderWindowStarted_HandlerException_DoesNotCrashLoop()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 17, 59) };
+        var scheduler = new SchedulerService(clock);
+        scheduler.ReminderWindowStarted += _ => throw new InvalidOperationException("boom");
+
+        scheduler.UpdatePlan(DefaultPlan());
+        scheduler.Start();
+        await clock.AdvanceToAsync(D(2026, 8, 6, 18, 0));
+        await clock.AdvanceToAsync(D(2026, 8, 6, 18, 0, 2));
+        await scheduler.StopAsync();
+
+        Assert.Equal(D(2026, 8, 7, 18, 0), scheduler.NextReminder!.Value);
     }
 }

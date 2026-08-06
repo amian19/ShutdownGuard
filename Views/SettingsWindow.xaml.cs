@@ -11,10 +11,12 @@ public partial class SettingsWindow : Window
     private readonly ConfigStore _store;
     private readonly AppConfig _originalConfig;
     private readonly SettingsViewModel _viewModel = new();
+    private bool _isSaving;
 
     /// <summary>
     /// Raised after a successful Save operation.
     /// The caller (TrayApp) should reload config and refresh the tray.
+    /// Must NOT trigger another ConfigStore.Save.
     /// </summary>
     public event EventHandler? Saved;
 
@@ -28,16 +30,14 @@ public partial class SettingsWindow : Window
 
         DataContext = _viewModel;
 
-        // Populate ComboBox items
-        for (int h = 0; h < 24; h++)
+        // Hours 00..21 (must be < fixed shutdown 22:00); minutes 00..59
+        for (int h = 0; h <= 21; h++)
             HourComboBox.Items.Add(h);
         for (int m = 0; m < 60; m++)
             MinuteComboBox.Items.Add(m);
 
-        // Load working copy from current config
-        _viewModel.Load(config, scheduler.NextShutdown);
+        _viewModel.Load(config, scheduler.NextReminder);
 
-        // Subscribe to DryRun changes to show/hide warning
         _viewModel.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(SettingsViewModel.DryRun))
@@ -47,16 +47,51 @@ public partial class SettingsWindow : Window
                     : Visibility.Visible;
             }
         };
+
+        DryRunWarningText.Visibility = _viewModel.DryRun
+            ? Visibility.Collapsed
+            : Visibility.Visible;
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
-        // Step 1: Create new ShutdownPlan and AppConfig snapshots
+        // Guard: one click → one save transaction.
+        if (_isSaving)
+            return;
+
+        if (!_viewModel.TryValidate(out var validationError))
+        {
+            MessageBox.Show(
+                validationError ?? "提醒开始时间无效。",
+                "ShutdownGuard — 验证失败",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        _isSaving = true;
+        SaveButton.IsEnabled = false;
+
+        try
+        {
+            PersistOnce();
+        }
+        finally
+        {
+            _isSaving = false;
+            SaveButton.IsEnabled = true;
+        }
+    }
+
+    /// <summary>
+    /// Single save transaction:
+    /// 1 ConfigStore.Save + 1 Scheduler.UpdatePlan + 1 Settings saved log.
+    /// </summary>
+    private void PersistOnce()
+    {
         var plan = _viewModel.ToShutdownPlan();
         var desiredConfig = _viewModel.ToAppConfig();
 
-        // Step 2: If RunAtStartup changed, update registry FIRST.
-        // If registry fails, abort the entire save — do not persist anything.
         bool runAtStartupChanged = desiredConfig.RunAtStartup != _originalConfig.RunAtStartup;
         if (runAtStartupChanged)
         {
@@ -72,12 +107,10 @@ public partial class SettingsWindow : Window
                     "ShutdownGuard — 错误",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
-                return; // Abort — nothing persisted
+                return;
             }
         }
 
-        // Step 3: Persist config to disk.
-        // If this fails and we changed the registry, try to roll back.
         try
         {
             _store.Save(desiredConfig);
@@ -86,7 +119,6 @@ public partial class SettingsWindow : Window
         {
             AppLogger.Error($"Config save failed: {ex.Message}");
 
-            // Best-effort rollback: restore original RunAtStartup in registry
             if (runAtStartupChanged)
             {
                 try
@@ -113,33 +145,27 @@ public partial class SettingsWindow : Window
                 "ShutdownGuard — 错误",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
-            return; // Abort — nothing persisted (registry rolled back if needed)
+            return;
         }
 
-        // Step 4: Persistence succeeded — now update runtime state.
-        // Scheduler only receives config that has been successfully saved to disk.
-
+        // Persistence succeeded — update runtime scheduler once.
         _scheduler.UpdatePlan(plan);
 
-        // Step 5: Update executor based on DryRun
-        IShutdownExecutor executor = plan.DryRun
-            ? new DryRunShutdownExecutor()
-            : new WindowsShutdownExecutor();
-        _scheduler.UpdateExecutor(executor);
+        _viewModel.NextReminderText = SettingsViewModel.FormatNextReminder(
+            _scheduler.NextReminder, plan.Enabled);
+        _viewModel.ScheduledShutdownText = SettingsViewModel.FormatScheduledShutdown(
+            _scheduler.NextReminder, plan.Enabled);
 
-        // Step 6: Refresh Next shutdown display
-        _viewModel.NextShutdownText = SettingsViewModel.FormatNextShutdown(
-            _scheduler.NextShutdown, plan.Enabled);
-
-        AppLogger.Info($"Settings saved: Enabled={plan.Enabled}, Time={plan.ShutdownTime}, DryRun={plan.DryRun}, RunAtStartup={desiredConfig.RunAtStartup}");
+        AppLogger.Info(
+            $"Settings saved: Enabled={plan.Enabled}, " +
+            $"ReminderStart={plan.ReminderStartTime:HH:mm}, " +
+            $"DryRun={plan.DryRun}, RunAtStartup={desiredConfig.RunAtStartup}");
 
         Saved?.Invoke(this, EventArgs.Empty);
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {
-        // Close without saving — working copy is discarded.
-        // Original config, scheduler, and registry are untouched.
         Close();
     }
 }

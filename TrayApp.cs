@@ -31,10 +31,9 @@ public sealed class TrayApp : IAsyncDisposable
 
     public TrayApp()
     {
-        var executor = CreateExecutor(_config.Shutdown.DryRun);
-        _scheduler = new SchedulerService(new SystemClock(), executor);
+        _scheduler = new SchedulerService(new SystemClock());
         // Event subscribed in constructor but guarded by _trayInitialized / _disposed
-        _scheduler.NextShutdownChanged += OnNextShutdownChanged;
+        _scheduler.NextReminderChanged += OnNextReminderChanged;
     }
 
     public void Start()
@@ -45,7 +44,6 @@ public sealed class TrayApp : IAsyncDisposable
         AppLogger.Info("Application started");
 
         // Step 2: Initialize tray UI FIRST — before any scheduler event can fire.
-        // This guarantees that OnNextShutdownChanged will find _trayIcon non-null.
         _trayIcon = new TaskbarIcon
         {
             ToolTipText = BuildTooltip(),
@@ -55,7 +53,6 @@ public sealed class TrayApp : IAsyncDisposable
         _trayInitialized = true;
 
         // Step 3: Now safe to update the scheduler — events will find UI ready.
-        var executor = CreateExecutor(_config.Shutdown.DryRun);
         _scheduler.UpdatePlan(_config.Shutdown);
 
         AppLogger.Info("Config loaded");
@@ -71,10 +68,8 @@ public sealed class TrayApp : IAsyncDisposable
     // ── Config application ───────────────────────────────────────
 
     /// <summary>
-    /// Applies a new config snapshot: persists to disk, updates scheduler,
-    /// replaces the in-memory config reference, and refreshes the tray.
-    /// This is the single entry point for config changes — both from
-    /// SettingsWindow and from tray menu actions.
+    /// Applies a new config snapshot from tray menu actions (not Settings Save).
+    /// SettingsWindow performs its own single save transaction.
     /// </summary>
     private void ApplyConfig(AppConfig newConfig)
     {
@@ -83,9 +78,6 @@ public sealed class TrayApp : IAsyncDisposable
 
         _scheduler.UpdatePlan(newConfig.Shutdown);
 
-        var executor = CreateExecutor(newConfig.Shutdown.DryRun);
-        _scheduler.UpdateExecutor(executor);
-
         RefreshTray();
     }
 
@@ -93,78 +85,78 @@ public sealed class TrayApp : IAsyncDisposable
 
     private string BuildTooltip()
     {
-        var next = _scheduler.NextShutdown;
         if (!_config.Shutdown.Enabled)
             return "ShutdownGuard — 已停用";
 
+        var next = _scheduler.NextReminder;
         if (next is null)
             return "ShutdownGuard — 已停用";
 
         var dryLabel = _config.Shutdown.DryRun ? " [安全测试]" : "";
-        return $"ShutdownGuard — 下次关机: {next:HH:mm}{dryLabel}";
+        return $"ShutdownGuard — 下次提醒: {next:HH:mm}{dryLabel}";
     }
 
     private ContextMenu BuildContextMenu()
     {
         var menu = new ContextMenu();
 
-        // Header
         var header = new TextBlock
         {
             Text = "ShutdownGuard",
             FontWeight = FontWeights.SemiBold,
             FontSize = 13
         };
-        var headerItem = new MenuItem
+        menu.Items.Add(new MenuItem
         {
             Header = header,
             IsEnabled = false,
             StaysOpenOnClick = true
-        };
-        menu.Items.Add(headerItem);
+        });
 
         menu.Items.Add(new Separator());
 
-        // Status
         var statusText = _config.Shutdown.Enabled ? "已启用" : "已停用";
-        var nextText = SettingsViewModel.FormatNextShutdown(_scheduler.NextShutdown, _config.Shutdown.Enabled);
-
-        var statusItem = new MenuItem
+        menu.Items.Add(new MenuItem
         {
-            Header = $"状态：{statusText} — {nextText}",
+            Header = $"状态：{statusText}",
             IsEnabled = false
-        };
-        menu.Items.Add(statusItem);
+        });
 
-        // Dry Run indicator
-        var dryRunItem = new MenuItem
+        var nextText = SettingsViewModel.FormatNextReminder(
+            _scheduler.NextReminder, _config.Shutdown.Enabled);
+        menu.Items.Add(new MenuItem
+        {
+            Header = $"下次提醒：{nextText}",
+            IsEnabled = false
+        });
+
+        menu.Items.Add(new MenuItem
+        {
+            Header = $"固定关机：{ShutdownPolicy.FixedShutdownTime:HH:mm}",
+            IsEnabled = false
+        });
+
+        menu.Items.Add(new MenuItem
         {
             Header = _config.Shutdown.DryRun ? "安全测试：开启" : "安全测试：关闭",
             IsEnabled = false
-        };
-        menu.Items.Add(dryRunItem);
+        });
 
         menu.Items.Add(new Separator());
 
-        // Open Settings
-        var settingsItem = new MenuItem
-        {
-            Header = "打开设置"
-        };
+        var settingsItem = new MenuItem { Header = "打开设置" };
         settingsItem.Click += (_, _) => OpenSettings();
         menu.Items.Add(settingsItem);
 
-        // Toggle Enable/Disable
         var toggleItem = new MenuItem
         {
-            Header = _config.Shutdown.Enabled ? "停用定时关机" : "启用定时关机"
+            Header = _config.Shutdown.Enabled ? "停用自动关机" : "启用自动关机"
         };
         toggleItem.Click += (_, _) => ToggleEnabled();
         menu.Items.Add(toggleItem);
 
         menu.Items.Add(new Separator());
 
-        // Exit
         var exitItem = new MenuItem
         {
             Header = new StackPanel
@@ -187,7 +179,6 @@ public sealed class TrayApp : IAsyncDisposable
 
     private void OpenSettings()
     {
-        // Single-instance: if window is already open, activate it
         if (_settingsWindow is { } existing)
         {
             existing.Activate();
@@ -197,9 +188,12 @@ public sealed class TrayApp : IAsyncDisposable
 
         _settingsWindow = new SettingsWindow(_scheduler, _store, _config);
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+
+        // Saved: reload in-memory config + refresh tray ONLY.
+        // Do NOT call ConfigStore.Save or Scheduler.UpdatePlan again
+        // (SettingsWindow already completed the single save transaction).
         _settingsWindow.Saved += (_, _) =>
         {
-            // Reload config from disk so TrayApp's _config is fresh
             _config = _store.Load();
             RefreshTray();
         };
@@ -215,7 +209,7 @@ public sealed class TrayApp : IAsyncDisposable
         var updatedPlan = new ShutdownPlan
         {
             Enabled = newEnabled,
-            ShutdownTime = _config.Shutdown.ShutdownTime,
+            ReminderStartTime = _config.Shutdown.ReminderStartTime,
             DryRun = _config.Shutdown.DryRun
         };
 
@@ -231,33 +225,9 @@ public sealed class TrayApp : IAsyncDisposable
         AppLogger.Info($"Scheduler {status} (via tray)");
     }
 
-    public void SetDryRun(bool dryRun)
-    {
-        var updatedPlan = new ShutdownPlan
-        {
-            Enabled = _config.Shutdown.Enabled,
-            ShutdownTime = _config.Shutdown.ShutdownTime,
-            DryRun = dryRun
-        };
-
-        var updatedConfig = new AppConfig
-        {
-            RunAtStartup = _config.RunAtStartup,
-            Shutdown = updatedPlan
-        };
-
-        ApplyConfig(updatedConfig);
-
-        AppLogger.Info($"DryRun set to {dryRun} (via tray)");
-    }
-
     // ── Events / Refresh ─────────────────────────────────────────
 
-    /// <summary>
-    /// Scheduler event handler. Guarded against firing before tray is ready
-    /// and after disposal. Delegates all UI updates to RefreshTray().
-    /// </summary>
-    private void OnNextShutdownChanged(DateTimeOffset? next)
+    private void OnNextReminderChanged(DateTimeOffset? next)
     {
         if (_disposed)
             return;
@@ -271,11 +241,6 @@ public sealed class TrayApp : IAsyncDisposable
         });
     }
 
-    /// <summary>
-    /// The single entry point for refreshing all tray UI state.
-    /// Safe to call at any point in the lifecycle — returns early if
-    /// the tray is not yet initialized or already disposed.
-    /// </summary>
     private void RefreshTray()
     {
         if (!_trayInitialized || _disposed || _trayIcon is null)
@@ -297,14 +262,8 @@ public sealed class TrayApp : IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
 
-        // Unsubscribe FIRST so no more events arrive during disposal.
-        _scheduler.NextShutdownChanged -= OnNextShutdownChanged;
+        _scheduler.NextReminderChanged -= OnNextReminderChanged;
         await _scheduler.DisposeAsync();
         _trayIcon?.Dispose();
-    }
-
-    private static IShutdownExecutor CreateExecutor(bool dryRun)
-    {
-        return dryRun ? new DryRunShutdownExecutor() : new WindowsShutdownExecutor();
     }
 }

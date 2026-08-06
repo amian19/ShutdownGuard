@@ -3,45 +3,53 @@ using ShutdownGuard.Models;
 namespace ShutdownGuard.Core;
 
 /// <summary>
-/// Computes the target occurrence for a given day based on the plan.
-/// Always returns today's target (in local time), even if it has already passed.
-/// The caller (SchedulerService) decides whether to execute a missed occurrence
-/// or skip to tomorrow.
+/// Computes daily reminder-start occurrences from the plan.
+/// Always returns today's reminder target (in local time), even if it has already passed.
+/// The caller (SchedulerService) decides whether to enter the reminder window or skip to tomorrow.
 /// </summary>
 public sealed class DailyPolicy
 {
     /// <summary>
-    /// Returns today's shutdown target occurrence, or null if the plan is disabled.
-    /// The returned value is always today's date + plan.ShutdownTime, regardless of
-    /// whether that time has already passed.
+    /// Returns today's reminder-start occurrence, or null if the plan is disabled.
     /// </summary>
-    public DateTimeOffset? GetTodayTarget(ShutdownPlan plan, DateTimeOffset now)
+    public DateTimeOffset? GetTodayReminder(ShutdownPlan plan, DateTimeOffset now)
     {
         if (!plan.Enabled)
             return null;
 
-        // Explicitly construct midnight with the same offset to avoid
-        // any ambiguity with DateTimeOffset.Date across .NET versions.
         var midnight = new DateTimeOffset(now.Year, now.Month, now.Day, 0, 0, 0, now.Offset);
-        return midnight + plan.ShutdownTime.ToTimeSpan();
+        return midnight + plan.ReminderStartTime.ToTimeSpan();
     }
 
     /// <summary>
-    /// Returns the next upcoming occurrence (today if still in the future, otherwise tomorrow).
-    /// Used for display purposes (UI tooltip).
+    /// Returns today's fixed shutdown instant (22:00), or null if disabled.
+    /// Presentation / M4 use only — SchedulerService does not execute shutdown in M3.5.
     /// </summary>
-    public DateTimeOffset? GetNextOccurrence(ShutdownPlan plan, DateTimeOffset now)
+    public DateTimeOffset? GetTodayFixedShutdown(ShutdownPlan plan, DateTimeOffset now)
     {
         if (!plan.Enabled)
             return null;
 
-        var today = now.Date;
-        var targetToday = today + plan.ShutdownTime.ToTimeSpan();
+        var midnight = new DateTimeOffset(now.Year, now.Month, now.Day, 0, 0, 0, now.Offset);
+        return midnight + ShutdownPolicy.FixedShutdownTime.ToTimeSpan();
+    }
 
-        if (targetToday >= now)
-            return targetToday;
+    /// <summary>
+    /// Returns the next upcoming reminder start (today if still in the future, otherwise tomorrow).
+    /// Used for display when not currently inside an active reminder window.
+    /// </summary>
+    public DateTimeOffset? GetNextReminder(ShutdownPlan plan, DateTimeOffset now)
+    {
+        if (!plan.Enabled)
+            return null;
 
-        // Already passed today — schedule for tomorrow
-        return today.AddDays(1) + plan.ShutdownTime.ToTimeSpan();
+        var today = GetTodayReminder(plan, now);
+        if (today is null)
+            return null;
+
+        if (today.Value >= now)
+            return today;
+
+        return today.Value.AddDays(1);
     }
 }

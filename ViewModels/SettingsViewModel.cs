@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using ShutdownGuard.Core;
 using ShutdownGuard.Models;
 
 namespace ShutdownGuard.ViewModels;
@@ -11,11 +12,13 @@ namespace ShutdownGuard.ViewModels;
 public sealed class SettingsViewModel : INotifyPropertyChanged
 {
     private bool _enabled;
-    private int _hour;
-    private int _minute;
+    private int _reminderHour;
+    private int _reminderMinute;
     private bool _dryRun;
     private bool _runAtStartup;
-    private string _nextShutdownText = "无";
+    private string _nextReminderText = "无";
+    private string _scheduledShutdownText = "无";
+    private string? _validationError;
 
     public bool Enabled
     {
@@ -23,16 +26,16 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set { _enabled = value; OnPropertyChanged(); }
     }
 
-    public int Hour
+    public int ReminderHour
     {
-        get => _hour;
-        set { _hour = Clamp(value, 0, 23); OnPropertyChanged(); }
+        get => _reminderHour;
+        set { _reminderHour = Clamp(value, 0, 21); OnPropertyChanged(); }
     }
 
-    public int Minute
+    public int ReminderMinute
     {
-        get => _minute;
-        set { _minute = Clamp(value, 0, 59); OnPropertyChanged(); }
+        get => _reminderMinute;
+        set { _reminderMinute = Clamp(value, 0, 59); OnPropertyChanged(); }
     }
 
     public bool DryRun
@@ -47,10 +50,25 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set { _runAtStartup = value; OnPropertyChanged(); }
     }
 
-    public string NextShutdownText
+    public string NextReminderText
     {
-        get => _nextShutdownText;
-        set { _nextShutdownText = value; OnPropertyChanged(); }
+        get => _nextReminderText;
+        set { _nextReminderText = value; OnPropertyChanged(); }
+    }
+
+    public string ScheduledShutdownText
+    {
+        get => _scheduledShutdownText;
+        set { _scheduledShutdownText = value; OnPropertyChanged(); }
+    }
+
+    public string FixedShutdownDisplay =>
+        $"{ShutdownPolicy.FixedShutdownTime.Hour:D2} : {ShutdownPolicy.FixedShutdownTime.Minute:D2}";
+
+    public string? ValidationError
+    {
+        get => _validationError;
+        private set { _validationError = value; OnPropertyChanged(); }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -59,14 +77,16 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     /// Populates the ViewModel from a loaded config and scheduler state.
     /// Creates a working copy — the original config is not mutated.
     /// </summary>
-    public void Load(AppConfig config, DateTimeOffset? nextShutdown)
+    public void Load(AppConfig config, DateTimeOffset? nextReminder)
     {
         _enabled = config.Shutdown.Enabled;
-        _hour = config.Shutdown.ShutdownTime.Hour;
-        _minute = config.Shutdown.ShutdownTime.Minute;
+        _reminderHour = config.Shutdown.ReminderStartTime.Hour;
+        _reminderMinute = config.Shutdown.ReminderStartTime.Minute;
         _dryRun = config.Shutdown.DryRun;
         _runAtStartup = config.RunAtStartup;
-        _nextShutdownText = FormatNextShutdown(nextShutdown, config.Shutdown.Enabled);
+        _validationError = null;
+        _nextReminderText = FormatNextReminder(nextReminder, config.Shutdown.Enabled);
+        _scheduledShutdownText = FormatScheduledShutdown(nextReminder, config.Shutdown.Enabled);
     }
 
     /// <summary>
@@ -78,7 +98,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         return new ShutdownPlan
         {
             Enabled = _enabled,
-            ShutdownTime = new TimeOnly(_hour, _minute),
+            ReminderStartTime = new TimeOnly(_reminderHour, _reminderMinute),
             DryRun = _dryRun
         };
     }
@@ -96,24 +116,66 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Formats the NextShutdown value for display. Only does presentation —
-    /// does not recalculate scheduling logic (that's SchedulerService's job).
+    /// Validates ReminderStartTime &lt; fixed shutdown (22:00). Does not silent-correct.
     /// </summary>
-    public static string FormatNextShutdown(DateTimeOffset? next, bool enabled)
+    public bool TryValidate(out string? error)
+    {
+        var reminder = new TimeOnly(_reminderHour, _reminderMinute);
+        if (!ShutdownPolicy.IsValidReminderStartTime(reminder))
+        {
+            error = $"提醒开始时间必须早于固定关机时间 {ShutdownPolicy.FixedShutdownTime:HH:mm}。";
+            ValidationError = error;
+            return false;
+        }
+
+        error = null;
+        ValidationError = null;
+        return true;
+    }
+
+    /// <summary>
+    /// Formats NextReminder for display. Presentation only — does not recalculate scheduling.
+    /// </summary>
+    public static string FormatNextReminder(DateTimeOffset? next, bool enabled)
     {
         if (!enabled || next is null)
             return "无";
 
+        return FormatRelativeDateTime(next.Value);
+    }
+
+    /// <summary>
+    /// Formats the planned fixed shutdown (22:00 on the same day as NextReminder).
+    /// Presentation only — does not participate in shutdown scheduling.
+    /// </summary>
+    public static string FormatScheduledShutdown(DateTimeOffset? nextReminder, bool enabled)
+    {
+        if (!enabled || nextReminder is null)
+            return "无";
+
+        var shutdown = new DateTimeOffset(
+            nextReminder.Value.Year,
+            nextReminder.Value.Month,
+            nextReminder.Value.Day,
+            ShutdownPolicy.FixedShutdownTime.Hour,
+            ShutdownPolicy.FixedShutdownTime.Minute,
+            0,
+            nextReminder.Value.Offset);
+
+        return FormatRelativeDateTime(shutdown);
+    }
+
+    public static string FormatRelativeDateTime(DateTimeOffset value)
+    {
         var now = DateTimeOffset.Now;
-        var nextVal = next.Value;
 
-        if (nextVal.Date == now.Date)
-            return $"今天 {nextVal:HH:mm}";
+        if (value.Date == now.Date)
+            return $"今天 {value:HH:mm}";
 
-        if (nextVal.Date == now.Date.AddDays(1))
-            return $"明天 {nextVal:HH:mm}";
+        if (value.Date == now.Date.AddDays(1))
+            return $"明天 {value:HH:mm}";
 
-        return $"{nextVal:yyyy年M月d日 HH:mm}";
+        return $"{value:yyyy年M月d日 HH:mm}";
     }
 
     private void OnPropertyChanged([CallerMemberName] string? name = null)

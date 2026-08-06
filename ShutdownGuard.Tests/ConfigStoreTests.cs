@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ShutdownGuard.Core;
 using ShutdownGuard.Models;
 using ShutdownGuard.Services;
 using Xunit;
@@ -21,37 +22,19 @@ public class ConfigStoreTests : IDisposable
     }
 
     [Fact]
-    public void Load_MissingConfig_ReturnsDefaults()
+    public void Load_MissingConfig_ReturnsEnabledDefaults()
     {
         var store = new ConfigStore(_testDir);
         var config = store.Load();
 
         Assert.False(config.RunAtStartup);
-        Assert.NotNull(config.Shutdown);
-        Assert.False(config.Shutdown.Enabled);
+        Assert.True(config.Shutdown.Enabled);
         Assert.True(config.Shutdown.DryRun);
-        Assert.Equal(new TimeOnly(23, 0), config.Shutdown.ShutdownTime);
+        Assert.Equal(new TimeOnly(18, 0), config.Shutdown.ReminderStartTime);
     }
 
     [Fact]
-    public void Load_OldM1Config_MigratesCorrectly()
-    {
-        // M1 config only had RunAtStartup
-        Directory.CreateDirectory(_testDir);
-        var m1Json = @"{""runAtStartup"": true}";
-        File.WriteAllText(Path.Combine(_testDir, "config.json"), m1Json);
-
-        var store = new ConfigStore(_testDir);
-        var config = store.Load();
-
-        Assert.True(config.RunAtStartup);
-        Assert.NotNull(config.Shutdown); // Must not be null
-        Assert.False(config.Shutdown.Enabled);
-        Assert.True(config.Shutdown.DryRun);
-    }
-
-    [Fact]
-    public void Load_CorruptJson_ReturnsSafeDefaults()
+    public void Load_CorruptJson_ReturnsSafeDisabledFallback()
     {
         Directory.CreateDirectory(_testDir);
         File.WriteAllText(Path.Combine(_testDir, "config.json"), "{abc");
@@ -59,14 +42,63 @@ public class ConfigStoreTests : IDisposable
         var store = new ConfigStore(_testDir);
         var config = store.Load();
 
-        // Must not crash — return safe defaults
         Assert.False(config.RunAtStartup);
         Assert.False(config.Shutdown.Enabled);
+        Assert.True(config.Shutdown.DryRun);
+        Assert.Equal(new TimeOnly(18, 0), config.Shutdown.ReminderStartTime);
+    }
+
+    [Fact]
+    public void Load_OldShutdownTime_LessThan22_MigratesToReminder()
+    {
+        Directory.CreateDirectory(_testDir);
+        var json = """
+            {
+              "runAtStartup": false,
+              "shutdown": {
+                "enabled": true,
+                "shutdownTime": "20:30:00",
+                "dryRun": true
+              }
+            }
+            """;
+        File.WriteAllText(Path.Combine(_testDir, "config.json"), json);
+
+        var store = new ConfigStore(_testDir);
+        var config = store.Load();
+
+        Assert.True(config.Shutdown.Enabled);
+        Assert.Equal(new TimeOnly(20, 30), config.Shutdown.ReminderStartTime);
         Assert.True(config.Shutdown.DryRun);
     }
 
     [Fact]
-    public void SaveAndLoad_Roundtrip_Equivalent()
+    public void Load_OldShutdownTime_GreaterOrEqual22_FallsBackTo1800()
+    {
+        Directory.CreateDirectory(_testDir);
+        var json = """
+            {
+              "runAtStartup": true,
+              "shutdown": {
+                "enabled": true,
+                "shutdownTime": "23:00:00",
+                "dryRun": false
+              }
+            }
+            """;
+        File.WriteAllText(Path.Combine(_testDir, "config.json"), json);
+
+        var store = new ConfigStore(_testDir);
+        var config = store.Load();
+
+        Assert.True(config.RunAtStartup);
+        Assert.True(config.Shutdown.Enabled);
+        Assert.False(config.Shutdown.DryRun);
+        Assert.Equal(new TimeOnly(18, 0), config.Shutdown.ReminderStartTime);
+    }
+
+    [Fact]
+    public void SaveAndLoad_NewSchema_Roundtrip()
     {
         var store = new ConfigStore(_testDir);
 
@@ -76,7 +108,7 @@ public class ConfigStoreTests : IDisposable
             Shutdown = new ShutdownPlan
             {
                 Enabled = true,
-                ShutdownTime = new TimeOnly(22, 30),
+                ReminderStartTime = new TimeOnly(19, 15),
                 DryRun = false
             }
         };
@@ -86,47 +118,69 @@ public class ConfigStoreTests : IDisposable
 
         Assert.Equal(original.RunAtStartup, loaded.RunAtStartup);
         Assert.Equal(original.Shutdown.Enabled, loaded.Shutdown.Enabled);
-        Assert.Equal(original.Shutdown.ShutdownTime, loaded.Shutdown.ShutdownTime);
+        Assert.Equal(original.Shutdown.ReminderStartTime, loaded.Shutdown.ReminderStartTime);
         Assert.Equal(original.Shutdown.DryRun, loaded.Shutdown.DryRun);
+
+        var savedJson = File.ReadAllText(Path.Combine(_testDir, "config.json"));
+        Assert.Contains("reminderStartTime", savedJson);
+        Assert.DoesNotContain("shutdownTime", savedJson);
+        Assert.DoesNotContain("22:00", savedJson);
     }
 
     [Fact]
-    public void SaveAndLoad_Roundtrip_Defaults()
+    public void Load_OldM1Config_UsesFreshPlanDefaults()
     {
-        var store = new ConfigStore(_testDir);
-
-        var original = new AppConfig(); // All defaults
-        store.Save(original);
-        var loaded = store.Load();
-
-        Assert.Equal(original.RunAtStartup, loaded.RunAtStartup);
-        Assert.Equal(original.Shutdown.Enabled, loaded.Shutdown.Enabled);
-        Assert.Equal(original.Shutdown.DryRun, loaded.Shutdown.DryRun);
-    }
-
-    [Fact]
-    public void Load_ShutdownSectionMissing_DefaultsShutdown()
-    {
-        // JSON with runAtStartup but no shutdown section
         Directory.CreateDirectory(_testDir);
-        var json = @"{""runAtStartup"": false}";
-        File.WriteAllText(Path.Combine(_testDir, "config.json"), json);
+        File.WriteAllText(Path.Combine(_testDir, "config.json"), """{"runAtStartup": true}""");
 
         var store = new ConfigStore(_testDir);
         var config = store.Load();
 
-        Assert.NotNull(config.Shutdown);
-        Assert.False(config.Shutdown.Enabled);
+        Assert.True(config.RunAtStartup);
+        Assert.True(config.Shutdown.Enabled);
+        Assert.Equal(new TimeOnly(18, 0), config.Shutdown.ReminderStartTime);
         Assert.True(config.Shutdown.DryRun);
     }
 
     [Fact]
-    public void TimeOnly_JsonRoundtrip_ProducesExpectedFormat()
+    public void Load_PrefersReminderStartTime_OverLegacyShutdownTime()
+    {
+        Directory.CreateDirectory(_testDir);
+        var json = """
+            {
+              "shutdown": {
+                "enabled": true,
+                "reminderStartTime": "19:00:00",
+                "shutdownTime": "20:30:00",
+                "dryRun": true
+              }
+            }
+            """;
+        File.WriteAllText(Path.Combine(_testDir, "config.json"), json);
+
+        var config = new ConfigStore(_testDir).Load();
+        Assert.Equal(new TimeOnly(19, 0), config.Shutdown.ReminderStartTime);
+    }
+
+    [Fact]
+    public void FreshDefault_And_CorruptFallback_DifferOnEnabled()
+    {
+        var fresh = ConfigStore.CreateFreshDefault();
+        var corrupt = ConfigStore.CreateCorruptFallback();
+
+        Assert.True(fresh.Shutdown.Enabled);
+        Assert.False(corrupt.Shutdown.Enabled);
+        Assert.Equal(ShutdownPolicy.DefaultReminderStartTime, fresh.Shutdown.ReminderStartTime);
+        Assert.Equal(ShutdownPolicy.DefaultReminderStartTime, corrupt.Shutdown.ReminderStartTime);
+    }
+
+    [Fact]
+    public void ReminderStartTime_JsonRoundtrip_ProducesExpectedFormat()
     {
         var plan = new ShutdownPlan
         {
             Enabled = true,
-            ShutdownTime = new TimeOnly(23, 0),
+            ReminderStartTime = new TimeOnly(18, 0),
             DryRun = true
         };
 
@@ -135,48 +189,26 @@ public class ConfigStoreTests : IDisposable
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
 
-        Assert.Contains(@"""shutdownTime"":""23:00:00""", json);
+        Assert.Contains(@"""reminderStartTime"":""18:00:00""", json);
     }
 
     [Fact]
-    public void TimeOnly_JsonRoundtrip_FullCycle()
+    public void ReminderStartTime_JsonRoundtrip_FullCycle()
     {
         var plan = new ShutdownPlan
         {
             Enabled = true,
-            ShutdownTime = new TimeOnly(8, 15, 30),
+            ReminderStartTime = new TimeOnly(8, 15, 30),
             DryRun = false
         };
 
-        var json = JsonSerializer.Serialize(plan, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
-
-        var deserialized = JsonSerializer.Deserialize<ShutdownPlan>(json, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var json = JsonSerializer.Serialize(plan, options);
+        var deserialized = JsonSerializer.Deserialize<ShutdownPlan>(json, options);
 
         Assert.NotNull(deserialized);
-        Assert.Equal(plan.Enabled, deserialized!.Enabled);
-        Assert.Equal(plan.ShutdownTime, deserialized.ShutdownTime);
+        Assert.Equal(plan.ReminderStartTime, deserialized!.ReminderStartTime);
+        Assert.Equal(plan.Enabled, deserialized.Enabled);
         Assert.Equal(plan.DryRun, deserialized.DryRun);
-    }
-
-    [Fact]
-    public void TimeOnly_JsonFormat_UsesColonSeparators()
-    {
-        var plan = new ShutdownPlan
-        {
-            ShutdownTime = new TimeOnly(9, 5, 0)
-        };
-
-        var json = JsonSerializer.Serialize(plan, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
-
-        Assert.Contains(@"""shutdownTime"":""09:05:00""", json);
     }
 }
