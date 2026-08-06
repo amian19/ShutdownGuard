@@ -858,4 +858,147 @@ public class SchedulerServiceTests
 
         Assert.False(handlerCrash, "After disposal, handler must not crash");
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // M3.1.2 Tests — Execution Observability
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// DryRunShutdownExecutor must fire ShutdownTriggered event when executed,
+    /// providing an observable hook for the execution.
+    /// </summary>
+    [Fact]
+    public async Task DryRunExecutor_FiresShutdownTriggeredEvent()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59, 58) };
+        var executor = new DryRunShutdownExecutor();
+        var scheduler = new SchedulerService(clock, executor);
+
+        DateTimeOffset? triggeredAt = null;
+        executor.ShutdownTriggered += dt => triggeredAt = dt;
+
+        scheduler.UpdatePlan(new ShutdownPlan
+        {
+            Enabled = true,
+            ShutdownTime = new TimeOnly(23, 0),
+            DryRun = true
+        });
+
+        scheduler.Start();
+        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 0));
+        await scheduler.StopAsync();
+
+        Assert.NotNull(triggeredAt);
+        Assert.Equal(1, executor.ExecuteCount);
+        Assert.NotNull(executor.LastTriggeredAt);
+    }
+
+    /// <summary>
+    /// After execution, NextShutdown must advance to the next day.
+    /// </summary>
+    [Fact]
+    public async Task NextShutdown_AdvancesToNextDay_AfterExecution()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59, 58) };
+        var executor = new DryRunShutdownExecutor();
+        var scheduler = new SchedulerService(clock, executor);
+
+        scheduler.UpdatePlan(new ShutdownPlan
+        {
+            Enabled = true,
+            ShutdownTime = new TimeOnly(23, 0),
+            DryRun = true
+        });
+
+        scheduler.Start();
+        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 0));
+        await scheduler.StopAsync();
+
+        // NextShutdown should be tomorrow's 23:00
+        Assert.Equal(D(2026, 8, 6, 23, 0), scheduler.NextShutdown!.Value);
+    }
+
+    /// <summary>
+    /// When the executor throws an exception, the scheduler must:
+    /// - Not crash the background loop
+    /// - Not retry the same occurrence
+    /// - Still advance NextShutdown to tomorrow
+    /// </summary>
+    [Fact]
+    public async Task ExecutorException_DoesNotCrashLoop_DoesNotRetry_AdvancesNextShutdown()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59, 58) };
+        var executor = new ThrowingShutdownExecutor();
+        var scheduler = new SchedulerService(clock, executor);
+
+        scheduler.UpdatePlan(new ShutdownPlan
+        {
+            Enabled = true,
+            ShutdownTime = new TimeOnly(23, 0),
+            DryRun = true
+        });
+
+        scheduler.Start();
+        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 0));
+
+        // Give the loop time to process the exception and continue
+        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 2));
+        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 3));
+
+        await scheduler.StopAsync();
+
+        // Executor was called exactly once (no retry)
+        Assert.Equal(1, executor.ExecuteCount);
+
+        // NextShutdown advanced to tomorrow (loop didn't crash)
+        Assert.Equal(D(2026, 8, 6, 23, 0), scheduler.NextShutdown!.Value);
+    }
+
+    /// <summary>
+    /// A second occurrence the next day still executes normally
+    /// after a previous executor failure.
+    /// </summary>
+    [Fact]
+    public async Task AfterExecutorException_NextDayOccurrenceStillExecutes()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 5, 22, 59, 58) };
+        var executor = new ThrowingShutdownExecutor();
+        var scheduler = new SchedulerService(clock, executor);
+
+        scheduler.UpdatePlan(new ShutdownPlan
+        {
+            Enabled = true,
+            ShutdownTime = new TimeOnly(23, 0),
+            DryRun = true
+        });
+
+        scheduler.Start();
+
+        // First execution — throws
+        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 0));
+        await clock.AdvanceToAsync(D(2026, 8, 5, 23, 0, 1));
+
+        // Advance to next day
+        await clock.AdvanceToAsync(D(2026, 8, 6, 22, 59, 58));
+        await clock.AdvanceToAsync(D(2026, 8, 6, 23, 0, 0));
+
+        await scheduler.StopAsync();
+
+        // Both occurrences attempted (each exactly once)
+        Assert.Equal(2, executor.ExecuteCount);
+        Assert.Equal(D(2026, 8, 7, 23, 0), scheduler.NextShutdown!.Value);
+    }
+
+    // ── Test helper: executor that always throws ──────────────────
+
+    private sealed class ThrowingShutdownExecutor : IShutdownExecutor
+    {
+        public int ExecuteCount { get; private set; }
+
+        public Task ExecuteAsync(CancellationToken cancellationToken = default)
+        {
+            ExecuteCount++;
+            throw new InvalidOperationException("Simulated executor failure");
+        }
+    }
 }

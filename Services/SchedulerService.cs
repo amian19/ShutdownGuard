@@ -225,8 +225,19 @@ public sealed class SchedulerService : IAsyncDisposable
                 continue;
 
             // ── Execute ──
+            AppLogger.Info($"Shutdown occurrence reached: {armed.Value:yyyy-MM-dd HH:mm:ss zzz}");
             _lastExecutedOccurrence = armed.Value;
-            await executor.ExecuteAsync(cancellationToken);
+
+            try
+            {
+                await executor.ExecuteAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error($"Shutdown execution failed for {armed.Value:yyyy-MM-dd HH:mm:ss zzz}: {ex.Message}");
+                // Marked as executed — will not retry this occurrence.
+                // Continue to advance to tomorrow's occurrence.
+            }
 
             // Advance to the next day's occurrence
             lock (_lock)

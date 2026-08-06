@@ -12,6 +12,7 @@ public sealed class DryRunShutdownExecutor : IShutdownExecutor
         LastTriggeredAt = DateTimeOffset.Now;
         ExecuteCount++;
 
+        AppLogger.Info($"DryRun shutdown executed at {LastTriggeredAt.Value:yyyy-MM-dd HH:mm:ss zzz}");
         ShutdownTriggered?.Invoke(LastTriggeredAt.Value);
         return Task.CompletedTask;
     }

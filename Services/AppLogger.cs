@@ -34,14 +34,22 @@ public static class AppLogger
 
     private static void Write(string level, string message)
     {
-        var now = DateTimeOffset.Now;
-        var logFile = Path.Combine(LogDir, $"shutdownguard-{now:yyyy-MM-dd}.log");
-        var line = $"{now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {message}{Environment.NewLine}";
-
-        lock (_lock)
+        try
         {
-            Directory.CreateDirectory(LogDir);
-            File.AppendAllText(logFile, line, Encoding.UTF8);
+            var now = DateTimeOffset.Now;
+            var logFile = Path.Combine(LogDir, $"shutdownguard-{now:yyyy-MM-dd}.log");
+            var line = $"{now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {message}{Environment.NewLine}";
+
+            lock (_lock)
+            {
+                Directory.CreateDirectory(LogDir);
+                File.AppendAllText(logFile, line, Encoding.UTF8);
+            }
+        }
+        catch
+        {
+            // Logger must never crash the application.
+            // Silently ignore write failures (permission denied, disk full, etc.).
         }
     }
 }
