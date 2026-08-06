@@ -2,9 +2,9 @@ using System.Diagnostics;
 
 namespace ShutdownGuard.Services;
 
-public static class PowerActionExecutor
+public sealed class WindowsShutdownExecutor : IShutdownExecutor
 {
-    public static void Shutdown()
+    public Task ExecuteAsync(CancellationToken cancellationToken = default)
     {
         Process.Start(new ProcessStartInfo
         {
@@ -13,5 +13,7 @@ public static class PowerActionExecutor
             CreateNoWindow = true,
             UseShellExecute = false
         });
+
+        return Task.CompletedTask;
     }
 }

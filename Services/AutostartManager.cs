@@ -41,7 +41,7 @@ public static class AutostartManager
     }
 
     /// <summary>
-    /// Scans known autostart locations and removes any IdlePulse entries.
+    /// Scans known autostart locations and removes any ShutdownGuard entries.
     /// Only touches per-user locations: HKCU\...\Run and the user's Startup folder.
     /// Never touches HKLM, scheduled tasks, or anything we didn't create.
     /// </summary>

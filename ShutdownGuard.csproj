@@ -10,7 +10,7 @@
     <RootNamespace>ShutdownGuard</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>ShutdownGuard</AssemblyName>
-    <ApplicationIcon>Assets\IdlePulse.ico</ApplicationIcon>
+    <ApplicationIcon>Assets\ShutdownGuard.ico</ApplicationIcon>
     <Version>1.0.1</Version>
     <Company>ShutdownGuard</Company>
     <Product>ShutdownGuard</Product>
@@ -32,7 +32,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Resource Include="Assets\IdlePulse.ico" />
+    <Resource Include="Assets\ShutdownGuard.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="ShutdownGuard.Tests\**" />
+    <None Remove="ShutdownGuard.Tests\**" />
   </ItemGroup>
 
 </Project>
