@@ -676,4 +676,79 @@ public class SchedulerServiceTests
 
         Assert.Equal(0, executor.ExecuteCount);
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // M3.1 Tests — Defensive Copy
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Modifying the ShutdownPlan object after passing it to UpdatePlan
+    /// must NOT affect the scheduler's internal state.
+    /// </summary>
+    [Fact]
+    public void UpdatePlan_DefensiveCopy_ModifyingOriginalDoesNotAffectScheduler()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 5, 20, 0) };
+        var executor = new DryRunShutdownExecutor();
+        var scheduler = new SchedulerService(clock, executor);
+
+        var plan = new ShutdownPlan
+        {
+            Enabled = true,
+            ShutdownTime = new TimeOnly(23, 0),
+            DryRun = true
+        };
+
+        scheduler.UpdatePlan(plan);
+
+        // Mutate the original object — must not affect scheduler
+        plan.Enabled = false;
+        plan.ShutdownTime = new TimeOnly(12, 0);
+        plan.DryRun = false;
+
+        // Scheduler must still reflect the original values passed to UpdatePlan
+        Assert.Equal(D(2026, 8, 5, 23, 0), scheduler.NextShutdown!.Value);
+    }
+
+    /// <summary>
+    /// After defensive copy, the scheduler's plan is isolated.
+    /// Calling UpdatePlan again with a different plan works correctly.
+    /// </summary>
+    [Fact]
+    public async Task UpdatePlan_DefensiveCopy_SubsequentUpdateWorks()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 5, 20, 0) };
+        var executor = new DryRunShutdownExecutor();
+        var scheduler = new SchedulerService(clock, executor);
+
+        var plan1 = new ShutdownPlan
+        {
+            Enabled = true,
+            ShutdownTime = new TimeOnly(23, 0),
+            DryRun = true
+        };
+
+        scheduler.UpdatePlan(plan1);
+
+        // Mutate plan1
+        plan1.Enabled = false;
+
+        // Update with plan2
+        var plan2 = new ShutdownPlan
+        {
+            Enabled = true,
+            ShutdownTime = new TimeOnly(21, 0),
+            DryRun = true
+        };
+        scheduler.UpdatePlan(plan2);
+
+        // Must reflect plan2, not plan1
+        Assert.Equal(D(2026, 8, 5, 21, 0), scheduler.NextShutdown!.Value);
+
+        scheduler.Start();
+        await clock.AdvanceToAsync(D(2026, 8, 5, 21, 0));
+        await scheduler.StopAsync();
+
+        Assert.Equal(1, executor.ExecuteCount);
+    }
 }

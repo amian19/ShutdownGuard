@@ -55,6 +55,29 @@ public sealed class TrayApp : IAsyncDisposable
         _scheduler.Start();
     }
 
+    // ── Config application ───────────────────────────────────────
+
+    /// <summary>
+    /// Applies a new config snapshot: persists to disk, updates scheduler,
+    /// replaces the in-memory config reference, and refreshes the tray.
+    /// This is the single entry point for config changes — both from
+    /// SettingsWindow and from tray menu actions.
+    /// </summary>
+    private void ApplyConfig(AppConfig newConfig)
+    {
+        _store.Save(newConfig);
+        _config = newConfig;
+
+        _scheduler.UpdatePlan(newConfig.Shutdown);
+
+        var executor = CreateExecutor(newConfig.Shutdown.DryRun);
+        _scheduler.UpdateExecutor(executor);
+
+        RefreshTray();
+    }
+
+    // ── Tooltip / ContextMenu ────────────────────────────────────
+
     private string BuildTooltip()
     {
         var next = _scheduler.NextShutdown;
@@ -149,6 +172,8 @@ public sealed class TrayApp : IAsyncDisposable
         return menu;
     }
 
+    // ── Settings window ──────────────────────────────────────────
+
     private void OpenSettings()
     {
         // Single-instance: if window is already open, activate it
@@ -170,30 +195,52 @@ public sealed class TrayApp : IAsyncDisposable
         _settingsWindow.Show();
     }
 
+    // ── Tray actions ─────────────────────────────────────────────
+
     private void ToggleEnabled()
     {
-        _config.Shutdown.Enabled = !_config.Shutdown.Enabled;
-        _store.Save(_config);
-        _scheduler.UpdatePlan(_config.Shutdown);
+        var newEnabled = !_config.Shutdown.Enabled;
 
-        var status = _config.Shutdown.Enabled ? "Enabled" : "Disabled";
-        AppLogger.Info($"Scheduler {status}");
+        var updatedPlan = new ShutdownPlan
+        {
+            Enabled = newEnabled,
+            ShutdownTime = _config.Shutdown.ShutdownTime,
+            DryRun = _config.Shutdown.DryRun
+        };
 
-        RefreshTray();
+        var updatedConfig = new AppConfig
+        {
+            RunAtStartup = _config.RunAtStartup,
+            Shutdown = updatedPlan
+        };
+
+        ApplyConfig(updatedConfig);
+
+        var status = newEnabled ? "Enabled" : "Disabled";
+        AppLogger.Info($"Scheduler {status} (via tray)");
     }
 
-    /// <summary>
-    /// Called when the user toggles DryRun mode.
-    /// Updates the executor in-place without restarting the scheduler.
-    /// </summary>
     public void SetDryRun(bool dryRun)
     {
-        _config.Shutdown.DryRun = dryRun;
-        _store.Save(_config);
-        _scheduler.UpdateExecutor(CreateExecutor(dryRun));
-        AppLogger.Info($"DryRun set to {dryRun}");
-        RefreshTray();
+        var updatedPlan = new ShutdownPlan
+        {
+            Enabled = _config.Shutdown.Enabled,
+            ShutdownTime = _config.Shutdown.ShutdownTime,
+            DryRun = dryRun
+        };
+
+        var updatedConfig = new AppConfig
+        {
+            RunAtStartup = _config.RunAtStartup,
+            Shutdown = updatedPlan
+        };
+
+        ApplyConfig(updatedConfig);
+
+        AppLogger.Info($"DryRun set to {dryRun} (via tray)");
     }
+
+    // ── Events / Refresh ─────────────────────────────────────────
 
     private void OnNextShutdownChanged(DateTimeOffset? next)
     {

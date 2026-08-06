@@ -57,7 +57,14 @@ public sealed class SchedulerService : IAsyncDisposable
     {
         lock (_lock)
         {
-            _plan = plan;
+            // Defensive copy: don't hold a reference to an external mutable object.
+            // This prevents callers from mutating the plan and bypassing UpdatePlan().
+            _plan = new ShutdownPlan
+            {
+                Enabled = plan.Enabled,
+                ShutdownTime = plan.ShutdownTime,
+                DryRun = plan.DryRun
+            };
             _armedOccurrence = ComputeArmedOccurrence();
             SyncNextShutdown();
         }

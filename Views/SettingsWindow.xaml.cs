@@ -51,42 +51,87 @@ public partial class SettingsWindow : Window
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
-        // Step 1: Create new ShutdownPlan snapshot (immutable-ish)
+        // Step 1: Create new ShutdownPlan and AppConfig snapshots
         var plan = _viewModel.ToShutdownPlan();
+        var desiredConfig = _viewModel.ToAppConfig();
 
-        // Step 2: Build AppConfig
-        var config = _viewModel.ToAppConfig();
+        // Step 2: If RunAtStartup changed, update registry FIRST.
+        // If registry fails, abort the entire save — do not persist anything.
+        bool runAtStartupChanged = desiredConfig.RunAtStartup != _originalConfig.RunAtStartup;
+        if (runAtStartupChanged)
+        {
+            try
+            {
+                AutostartManager.SetEnabled(desiredConfig.RunAtStartup);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error($"Autostart update failed: {ex.Message}");
+                MessageBox.Show(
+                    $"Failed to update Windows startup setting:\n{ex.Message}\n\nSettings were not saved.",
+                    "ShutdownGuard — Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return; // Abort — nothing persisted
+            }
+        }
 
-        // Step 3: Save to disk
-        _store.Save(config);
-
-        // Step 4: Update Windows Autostart
+        // Step 3: Persist config to disk.
+        // If this fails and we changed the registry, try to roll back.
         try
         {
-            AutostartManager.SetEnabled(config.RunAtStartup);
+            _store.Save(desiredConfig);
         }
         catch (Exception ex)
         {
+            AppLogger.Error($"Config save failed: {ex.Message}");
+
+            // Best-effort rollback: restore original RunAtStartup in registry
+            if (runAtStartupChanged)
+            {
+                try
+                {
+                    AutostartManager.SetEnabled(_originalConfig.RunAtStartup);
+                }
+                catch (Exception rollbackEx)
+                {
+                    AppLogger.Error($"Autostart rollback also failed: {rollbackEx.Message}");
+                    MessageBox.Show(
+                        $"Failed to save settings.\n\n" +
+                        $"Config save error: {ex.Message}\n" +
+                        $"Startup setting may be inconsistent.\n" +
+                        $"Expected: {(_originalConfig.RunAtStartup ? "enabled" : "disabled")}",
+                        "ShutdownGuard — Error",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                    return;
+                }
+            }
+
             MessageBox.Show(
-                $"Failed to update Windows startup setting:\n{ex.Message}",
+                $"Failed to save settings:\n{ex.Message}",
                 "ShutdownGuard — Error",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
-            // Don't crash — continue with other save steps
+            return; // Abort — nothing persisted (registry rolled back if needed)
         }
 
-        // Step 5: Notify running scheduler
+        // Step 4: Persistence succeeded — now update runtime state.
+        // Scheduler only receives config that has been successfully saved to disk.
+
         _scheduler.UpdatePlan(plan);
 
-        // Step 6: Update executor based on DryRun
+        // Step 5: Update executor based on DryRun
         IShutdownExecutor executor = plan.DryRun
             ? new DryRunShutdownExecutor()
             : new WindowsShutdownExecutor();
         _scheduler.UpdateExecutor(executor);
 
-        // Step 7: Refresh Next shutdown display
+        // Step 6: Refresh Next shutdown display
         _viewModel.NextShutdownText = SettingsViewModel.FormatNextShutdown(
             _scheduler.NextShutdown, plan.Enabled);
+
+        AppLogger.Info($"Settings saved: Enabled={plan.Enabled}, Time={plan.ShutdownTime}, DryRun={plan.DryRun}, RunAtStartup={desiredConfig.RunAtStartup}");
 
         Saved?.Invoke(this, EventArgs.Empty);
     }
