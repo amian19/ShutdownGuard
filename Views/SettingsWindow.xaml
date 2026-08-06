@@ -1,0 +1,131 @@
+<Window x:Class="ShutdownGuard.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="ShutdownGuard"
+        Width="420" Height="480"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource ApplicationBackgroundBrush}">
+
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Section: Scheduled Shutdown -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,16">
+            <TextBlock Text="Scheduled shutdown"
+                       FontSize="14" FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="Enable scheduled shutdown"
+                           VerticalAlignment="Center"/>
+                <ui:ToggleSwitch Grid.Column="1"
+                                 IsChecked="{Binding Enabled, Mode=TwoWay}"/>
+            </Grid>
+        </StackPanel>
+
+        <!-- Section: Shutdown Time -->
+        <StackPanel Grid.Row="1" Margin="0,0,0,16">
+            <TextBlock Text="Shutdown time"
+                       FontSize="14" FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <StackPanel Orientation="Horizontal">
+                <ComboBox x:Name="HourComboBox"
+                          Width="72"
+                          IsEnabled="{Binding Enabled}"
+                          SelectedItem="{Binding Hour, Mode=TwoWay}"/>
+                <TextBlock Text=" : "
+                           FontSize="16" FontWeight="Bold"
+                           VerticalAlignment="Center"
+                           Margin="4,0"/>
+                <ComboBox x:Name="MinuteComboBox"
+                          Width="72"
+                          IsEnabled="{Binding Enabled}"
+                          SelectedItem="{Binding Minute, Mode=TwoWay}"/>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- Section: Next Shutdown -->
+        <StackPanel Grid.Row="2" Margin="0,0,0,16">
+            <TextBlock Text="Next shutdown"
+                       FontSize="14" FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <TextBlock Text="{Binding NextShutdownText}"
+                       FontSize="13"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+        </StackPanel>
+
+        <!-- Section: Safety -->
+        <StackPanel Grid.Row="3" Margin="0,0,0,16">
+            <TextBlock Text="Safety"
+                       FontSize="14" FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="Dry Run (safe test mode)"
+                           VerticalAlignment="Center"/>
+                <ui:ToggleSwitch Grid.Column="1"
+                                 IsChecked="{Binding DryRun, Mode=TwoWay}"/>
+            </Grid>
+            <TextBlock Text="When enabled, shutdown is only logged and will not actually turn off the computer."
+                       FontSize="11"
+                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                       TextWrapping="Wrap"
+                       Margin="0,4,0,0"/>
+            <TextBlock x:Name="DryRunWarningText"
+                       Text="Warning: Disabling Dry Run will actually shut down Windows at the scheduled time."
+                       FontSize="11"
+                       Foreground="Orange"
+                       TextWrapping="Wrap"
+                       Visibility="Collapsed"
+                       Margin="0,4,0,0"/>
+        </StackPanel>
+
+        <!-- Section: System -->
+        <StackPanel Grid.Row="4" Margin="0,0,0,16">
+            <TextBlock Text="System"
+                       FontSize="14" FontWeight="SemiBold"
+                       Margin="0,0,0,8"/>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="Start with Windows"
+                           VerticalAlignment="Center"/>
+                <ui:ToggleSwitch Grid.Column="1"
+                                 IsChecked="{Binding RunAtStartup, Mode=TwoWay}"/>
+            </Grid>
+        </StackPanel>
+
+        <!-- Buttons -->
+        <StackPanel Grid.Row="6" Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,12,0,0">
+            <Button Content="Cancel"
+                    Width="80" Height="32"
+                    Margin="0,0,8,0"
+                    Click="Cancel_Click"/>
+            <ui:Button x:Name="SaveButton"
+                       Content="Save"
+                       Width="80" Height="32"
+                       Appearance="Primary"
+                       Click="Save_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

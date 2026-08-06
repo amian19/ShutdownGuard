@@ -4,6 +4,7 @@ using System.Windows.Media.Imaging;
 using ShutdownGuard.Core;
 using ShutdownGuard.Models;
 using ShutdownGuard.Services;
+using ShutdownGuard.Views;
 using Hardcodet.Wpf.TaskbarNotification;
 using Wpf.Ui.Controls;
 using ContextMenu = System.Windows.Controls.ContextMenu;
@@ -20,6 +21,7 @@ public sealed class TrayApp : IAsyncDisposable
     private readonly SchedulerService _scheduler;
     private TaskbarIcon? _trayIcon;
     private AppConfig _config = new();
+    private SettingsWindow? _settingsWindow;
     private bool _disposed;
 
     private static readonly BitmapImage _iconSource =
@@ -100,7 +102,23 @@ public sealed class TrayApp : IAsyncDisposable
         };
         menu.Items.Add(statusItem);
 
+        // Dry Run indicator
+        var dryRunItem = new MenuItem
+        {
+            Header = _config.Shutdown.DryRun ? "Dry Run: On" : "Dry Run: Off",
+            IsEnabled = false
+        };
+        menu.Items.Add(dryRunItem);
+
         menu.Items.Add(new Separator());
+
+        // Open Settings
+        var settingsItem = new MenuItem
+        {
+            Header = "Open Settings"
+        };
+        settingsItem.Click += (_, _) => OpenSettings();
+        menu.Items.Add(settingsItem);
 
         // Toggle Enable/Disable
         var toggleItem = new MenuItem
@@ -109,14 +127,6 @@ public sealed class TrayApp : IAsyncDisposable
         };
         toggleItem.Click += (_, _) => ToggleEnabled();
         menu.Items.Add(toggleItem);
-
-        // Dry Run indicator
-        var dryRunItem = new MenuItem
-        {
-            Header = _config.Shutdown.DryRun ? "Dry Run: On" : "Dry Run: Off",
-            IsEnabled = false
-        };
-        menu.Items.Add(dryRunItem);
 
         menu.Items.Add(new Separator());
 
@@ -137,6 +147,27 @@ public sealed class TrayApp : IAsyncDisposable
         menu.Items.Add(exitItem);
 
         return menu;
+    }
+
+    private void OpenSettings()
+    {
+        // Single-instance: if window is already open, activate it
+        if (_settingsWindow is { } existing)
+        {
+            existing.Activate();
+            existing.Focus();
+            return;
+        }
+
+        _settingsWindow = new SettingsWindow(_scheduler, _store, _config);
+        _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+        _settingsWindow.Saved += (_, _) =>
+        {
+            // Reload config from disk so TrayApp's _config is fresh
+            _config = _store.Load();
+            RefreshTray();
+        };
+        _settingsWindow.Show();
     }
 
     private void ToggleEnabled()
