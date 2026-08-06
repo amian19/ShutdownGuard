@@ -211,4 +211,49 @@ public class ConfigStoreTests : IDisposable
         Assert.Equal(plan.Enabled, deserialized.Enabled);
         Assert.Equal(plan.DryRun, deserialized.DryRun);
     }
+
+    [Fact]
+    public void Save_DoesNotWriteCancelledShutdownDate_IntoConfigJson()
+    {
+        var store = new ConfigStore(_testDir);
+        store.Save(new AppConfig
+        {
+            RunAtStartup = false,
+            Shutdown = new ShutdownPlan
+            {
+                Enabled = true,
+                ReminderStartTime = new TimeOnly(18, 0),
+                DryRun = true
+            }
+        });
+
+        var json = File.ReadAllText(Path.Combine(_testDir, "config.json"));
+        Assert.DoesNotContain("cancelledShutdownDate", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("CancelledShutdownDate", json);
+    }
+
+    [Fact]
+    public void Load_IgnoresLegacyCancelledShutdownDate_InConfigJson()
+    {
+        Directory.CreateDirectory(_testDir);
+        File.WriteAllText(
+            Path.Combine(_testDir, "config.json"),
+            """
+            {
+              "runAtStartup": false,
+              "cancelledShutdownDate": "2026-08-06",
+              "shutdown": {
+                "enabled": true,
+                "reminderStartTime": "18:00:00",
+                "dryRun": true
+              }
+            }
+            """);
+
+        var config = new ConfigStore(_testDir).Load();
+
+        // AppConfig has no CancelledShutdownDate — ensure load still succeeds.
+        Assert.True(config.Shutdown.Enabled);
+        Assert.Equal(new TimeOnly(18, 0), config.Shutdown.ReminderStartTime);
+    }
 }
