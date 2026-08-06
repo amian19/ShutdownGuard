@@ -22,6 +22,7 @@ public sealed class TrayApp : IAsyncDisposable
     private TaskbarIcon? _trayIcon;
     private AppConfig _config = new();
     private SettingsWindow? _settingsWindow;
+    private bool _trayInitialized;
     private bool _disposed;
 
     private static readonly BitmapImage _iconSource =
@@ -31,28 +32,39 @@ public sealed class TrayApp : IAsyncDisposable
     {
         var executor = CreateExecutor(_config.Shutdown.DryRun);
         _scheduler = new SchedulerService(new SystemClock(), executor);
+        // Event subscribed in constructor but guarded by _trayInitialized / _disposed
         _scheduler.NextShutdownChanged += OnNextShutdownChanged;
     }
 
     public void Start()
     {
+        // Step 1: Load config from disk
         _config = _store.Load();
         AppLogger.Init();
         AppLogger.Info("Application started");
 
-        var executor = CreateExecutor(_config.Shutdown.DryRun);
-        _scheduler.UpdatePlan(_config.Shutdown);
-
+        // Step 2: Initialize tray UI FIRST — before any scheduler event can fire.
+        // This guarantees that OnNextShutdownChanged will find _trayIcon non-null.
         _trayIcon = new TaskbarIcon
         {
             ToolTipText = BuildTooltip(),
             IconSource = _iconSource,
             ContextMenu = BuildContextMenu()
         };
+        _trayInitialized = true;
+
+        // Step 3: Now safe to update the scheduler — events will find UI ready.
+        var executor = CreateExecutor(_config.Shutdown.DryRun);
+        _scheduler.UpdatePlan(_config.Shutdown);
 
         AppLogger.Info("Config loaded");
         AppLogger.Info("Scheduler started");
+
+        // Step 4: Start the scheduling loop.
         _scheduler.Start();
+
+        // Step 5: Final tray refresh to ensure consistency.
+        RefreshTray();
     }
 
     // ── Config application ───────────────────────────────────────
@@ -242,18 +254,34 @@ public sealed class TrayApp : IAsyncDisposable
 
     // ── Events / Refresh ─────────────────────────────────────────
 
+    /// <summary>
+    /// Scheduler event handler. Guarded against firing before tray is ready
+    /// and after disposal. Delegates all UI updates to RefreshTray().
+    /// </summary>
     private void OnNextShutdownChanged(DateTimeOffset? next)
     {
-        Application.Current.Dispatcher.Invoke(() =>
+        if (_disposed)
+            return;
+
+        Application.Current?.Dispatcher.Invoke(() =>
         {
-            _trayIcon!.ToolTipText = BuildTooltip();
-            _trayIcon.ContextMenu = BuildContextMenu();
+            if (_disposed)
+                return;
+
+            RefreshTray();
         });
     }
 
+    /// <summary>
+    /// The single entry point for refreshing all tray UI state.
+    /// Safe to call at any point in the lifecycle — returns early if
+    /// the tray is not yet initialized or already disposed.
+    /// </summary>
     private void RefreshTray()
     {
-        if (_trayIcon is null) return;
+        if (!_trayInitialized || _disposed || _trayIcon is null)
+            return;
+
         _trayIcon.ToolTipText = BuildTooltip();
         _trayIcon.ContextMenu = BuildContextMenu();
     }
@@ -270,6 +298,7 @@ public sealed class TrayApp : IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
 
+        // Unsubscribe FIRST so no more events arrive during disposal.
         _scheduler.NextShutdownChanged -= OnNextShutdownChanged;
         await _scheduler.DisposeAsync();
         _trayIcon?.Dispose();

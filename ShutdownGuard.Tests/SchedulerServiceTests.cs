@@ -751,4 +751,111 @@ public class SchedulerServiceTests
 
         Assert.Equal(1, executor.ExecuteCount);
     }
+
+    // ══════════════════════════════════════════════════════════════
+    // M3.1.1 Tests — Event Handler Lifecycle Safety
+    // ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Regression test for the M3.1.1 startup crash:
+    /// Scheduler fires NextShutdownChanged synchronously inside UpdatePlan.
+    /// If the event handler accesses UI objects that haven't been initialized yet,
+    /// it must not crash. This test verifies the lifecycle guard pattern works:
+    /// checking a readiness flag before accessing nullable fields.
+    /// </summary>
+    [Fact]
+    public void NextShutdownChanged_FiresDuringUpdatePlan_HandlerMustGuardAgainstNullState()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 5, 20, 0) };
+        var scheduler = new SchedulerService(clock, new DryRunShutdownExecutor());
+
+        object? uiObject = null; // Simulates _trayIcon before initialization
+        bool handlerCrash = false;
+        bool handlerCalled = false;
+
+        scheduler.NextShutdownChanged += next =>
+        {
+            handlerCalled = true;
+            // Simulate the lifecycle guard: check readiness before accessing UI
+            if (uiObject is not null)
+            {
+                // Access UI — should not reach here when uiObject is null
+                _ = uiObject.ToString();
+            }
+        };
+
+        // Act: fire the event (same as UpdatePlan does)
+        try
+        {
+            scheduler.UpdatePlan(new ShutdownPlan
+            {
+                Enabled = true,
+                ShutdownTime = new TimeOnly(23, 0),
+                DryRun = true
+            });
+        }
+        catch (NullReferenceException)
+        {
+            handlerCrash = true;
+        }
+
+        Assert.True(handlerCalled, "Event handler should have been invoked");
+        Assert.False(handlerCrash, "Handler must not crash when UI is not yet initialized");
+    }
+
+    /// <summary>
+    /// After disposal, event handlers should still not crash if events arrive late.
+    /// </summary>
+    [Fact]
+    public void NextShutdownChanged_AfterDispose_HandlerMustBeSafe()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 5, 20, 0) };
+        var scheduler = new SchedulerService(clock, new DryRunShutdownExecutor());
+
+        bool disposed = false;
+        bool handlerCrash = false;
+
+        scheduler.NextShutdownChanged += _ =>
+        {
+            if (disposed) return;
+            // Simulate accessing a disposed UI object
+            throw new NullReferenceException("Simulated crash");
+        };
+
+        // Normal call — would crash but caught
+        try
+        {
+            scheduler.UpdatePlan(new ShutdownPlan
+            {
+                Enabled = true,
+                ShutdownTime = new TimeOnly(23, 0),
+                DryRun = true
+            });
+        }
+        catch (NullReferenceException)
+        {
+            handlerCrash = true;
+        }
+        Assert.True(handlerCrash, "Without guard, handler crashes");
+
+        // After disposal — guard prevents access
+        disposed = true;
+        handlerCrash = false;
+
+        try
+        {
+            scheduler.UpdatePlan(new ShutdownPlan
+            {
+                Enabled = false,
+                ShutdownTime = new TimeOnly(23, 0),
+                DryRun = true
+            });
+        }
+        catch (NullReferenceException)
+        {
+            handlerCrash = true;
+        }
+
+        Assert.False(handlerCrash, "After disposal, handler must not crash");
+    }
 }

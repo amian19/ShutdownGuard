@@ -40,7 +40,22 @@ public partial class App : Application
 
         base.OnStartup(e);
         _trayApp = new TrayApp();
-        _trayApp.Start();
+
+        try
+        {
+            _trayApp.Start();
+        }
+        catch (Exception ex)
+        {
+            LogCrash("Startup", ex);
+            ShowStartupFailureDialog(ex);
+
+            // Clean up: don't leave a half-initialized background process.
+            try { _trayApp.DisposeAsync().GetAwaiter().GetResult(); } catch { }
+            _trayApp = null;
+
+            Shutdown();
+        }
     }
 
     private static void ShowAlreadyRunningDialog()
@@ -57,6 +72,30 @@ public partial class App : Application
         var frame = new DispatcherFrame();
         task.GetAwaiter().OnCompleted(() => frame.Continue = false);
         Dispatcher.PushFrame(frame);
+    }
+
+    private static void ShowStartupFailureDialog(Exception ex)
+    {
+        try
+        {
+            var box = new Wpf.Ui.Controls.MessageBox
+            {
+                Title = "ShutdownGuard — Startup Error",
+                Content = $"Failed to start ShutdownGuard:\n\n{ex.Message}\n\nDetails written to:\n{LogPath}",
+                CloseButtonText = "OK",
+                IsPrimaryButtonEnabled = false,
+                IsSecondaryButtonEnabled = false
+            };
+            var task = box.ShowDialogAsync();
+            var frame = new DispatcherFrame();
+            task.GetAwaiter().OnCompleted(() => frame.Continue = false);
+            Dispatcher.PushFrame(frame);
+        }
+        catch
+        {
+            MessageBox.Show($"ShutdownGuard startup error:\n\n{ex.Message}\n\nDetails written to:\n{LogPath}",
+                "ShutdownGuard — Startup Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private static void LogCrash(string source, Exception? ex)
