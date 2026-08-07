@@ -162,9 +162,7 @@ public sealed class ConfigStore
             }
         }
 
-        if (TryReadTimeOnly(shutdownEl, "debugFixedShutdownTime", out var debugShutdown))
-            config.Shutdown.DebugFixedShutdownTime = debugShutdown;
-
+        // Ignore legacy debugFixedShutdownTime — product shutdown is always 22:00.
         return config;
     }
 

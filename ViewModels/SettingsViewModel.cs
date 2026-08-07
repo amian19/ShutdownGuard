@@ -13,16 +13,10 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 {
     private int _reminderHour;
     private int _reminderMinute;
-    private bool _useTestShutdownTime;
-    private int _testShutdownHour = 22;
-    private int _testShutdownMinute;
     private string _nextReminderText = "无";
     private string _scheduledShutdownText = "无";
     private bool _todayWillShutdown = true;
     private string? _validationError;
-
-    /// <summary>Always show test-shutdown controls in settings (for trial builds).</summary>
-    public bool ShowTestShutdownSettings => true;
 
     /// <summary>Product rule: auto-shutdown is always on.</summary>
     public bool Enabled
@@ -62,25 +56,6 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set { /* Product rule: always on. */ }
     }
 
-    /// <summary>Use custom test shutdown clock instead of 22:00.</summary>
-    public bool UseTestShutdownTime
-    {
-        get => _useTestShutdownTime;
-        set { _useTestShutdownTime = value; OnPropertyChanged(); OnPropertyChanged(nameof(FixedShutdownDisplay)); }
-    }
-
-    public int TestShutdownHour
-    {
-        get => _testShutdownHour;
-        set { _testShutdownHour = Clamp(value, 0, 23); OnPropertyChanged(); OnPropertyChanged(nameof(FixedShutdownDisplay)); }
-    }
-
-    public int TestShutdownMinute
-    {
-        get => _testShutdownMinute;
-        set { _testShutdownMinute = Clamp(value, 0, 59); OnPropertyChanged(); OnPropertyChanged(nameof(FixedShutdownDisplay)); }
-    }
-
     public string NextReminderText
     {
         get => _nextReminderText;
@@ -93,16 +68,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set { _scheduledShutdownText = value; OnPropertyChanged(); }
     }
 
-    public string FixedShutdownDisplay
-    {
-        get
-        {
-            var t = ResolveShutdownTimeForEdit();
-            return _useTestShutdownTime
-                ? $"{t:HH:mm}（测试）"
-                : $"{ShutdownPolicy.FixedShutdownTime:HH:mm}";
-        }
-    }
+    public string FixedShutdownDisplay => $"{ShutdownPolicy.FixedShutdownTime:HH:mm}";
 
     public string? ValidationError
     {
@@ -117,32 +83,16 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _reminderHour = config.Shutdown.ReminderStartTime.Hour;
         _reminderMinute = config.Shutdown.ReminderStartTime.Minute;
 
-        if (config.Shutdown.DebugFixedShutdownTime is { } debug)
-        {
-            _useTestShutdownTime = true;
-            _testShutdownHour = debug.Hour;
-            _testShutdownMinute = debug.Minute;
-        }
-        else
-        {
-            _useTestShutdownTime = false;
-            _testShutdownHour = ShutdownPolicy.FixedShutdownTime.Hour;
-            _testShutdownMinute = ShutdownPolicy.FixedShutdownTime.Minute;
-        }
-
         _validationError = null;
         _todayWillShutdown = !todayCancelled;
         _nextReminderText = FormatNextReminder(nextReminder, enabled: true, todayCancelled);
         _scheduledShutdownText = FormatScheduledShutdown(
-            nextReminder, enabled: true, todayCancelled, ResolveShutdownTimeForEdit());
+            nextReminder, enabled: true, todayCancelled, ShutdownPolicy.FixedShutdownTime);
 
         OnPropertyChanged(nameof(Enabled));
         OnPropertyChanged(nameof(TodayWillShutdown));
         OnPropertyChanged(nameof(ReminderHour));
         OnPropertyChanged(nameof(ReminderMinute));
-        OnPropertyChanged(nameof(UseTestShutdownTime));
-        OnPropertyChanged(nameof(TestShutdownHour));
-        OnPropertyChanged(nameof(TestShutdownMinute));
         OnPropertyChanged(nameof(FixedShutdownDisplay));
         OnPropertyChanged(nameof(NextReminderText));
         OnPropertyChanged(nameof(ScheduledShutdownText));
@@ -154,10 +104,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         {
             Enabled = true,
             ReminderStartTime = new TimeOnly(_reminderHour, _reminderMinute),
-            DryRun = false,
-            DebugFixedShutdownTime = _useTestShutdownTime
-                ? new TimeOnly(_testShutdownHour, _testShutdownMinute)
-                : null
+            DryRun = false
         };
     }
 
@@ -173,11 +120,10 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     public bool TryValidate(out string? error)
     {
         var reminder = new TimeOnly(_reminderHour, _reminderMinute);
-        var shutdown = ResolveShutdownTimeForEdit();
 
-        if (!ShutdownPolicy.IsValidReminderStartTime(reminder, shutdown))
+        if (!ShutdownPolicy.IsValidReminderStartTime(reminder, ShutdownPolicy.FixedShutdownTime))
         {
-            error = $"提醒开始时间必须早于关机时间 {shutdown:HH:mm}。";
+            error = $"提醒开始时间必须早于关机时间 {ShutdownPolicy.FixedShutdownTime:HH:mm}。";
             ValidationError = error;
             return false;
         }
@@ -185,13 +131,6 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         error = null;
         ValidationError = null;
         return true;
-    }
-
-    private TimeOnly ResolveShutdownTimeForEdit()
-    {
-        if (_useTestShutdownTime)
-            return new TimeOnly(_testShutdownHour, _testShutdownMinute);
-        return ShutdownPolicy.FixedShutdownTime;
     }
 
     public static string FormatScheduledShutdown(

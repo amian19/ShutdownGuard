@@ -59,21 +59,15 @@ public class SettingsViewModelTests
     }
 
     [Fact]
-    public void UseTestShutdownTime_AllowsReminderJustBeforeTestClock()
+    public void TryValidate_RejectsReminderAtOrAfterFixed2200()
     {
         var vm = new SettingsViewModel();
         vm.Load(new AppConfig(), null);
-        vm.UseTestShutdownTime = true;
-        vm.TestShutdownHour = 10;
-        vm.TestShutdownMinute = 35;
-        vm.ReminderHour = 10;
-        vm.ReminderMinute = 33;
+        vm.ReminderHour = 22;
+        vm.ReminderMinute = 0;
 
-        Assert.True(vm.TryValidate(out var error));
-        Assert.Null(error);
-
-        var plan = vm.ToShutdownPlan();
-        Assert.Equal(new TimeOnly(10, 35), plan.DebugFixedShutdownTime);
+        Assert.False(vm.TryValidate(out var error));
+        Assert.Contains("22:00", error);
     }
 
     [Fact]

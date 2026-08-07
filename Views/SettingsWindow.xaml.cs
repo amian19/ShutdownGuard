@@ -41,21 +41,11 @@ public partial class SettingsWindow : Window
 
         DataContext = _viewModel;
 
-        // Reminder hours 00..23 (validated against effective shutdown); minutes 00..59
+        // Reminder hours 00..23 (validated against fixed 22:00); minutes 00..59
         for (int h = 0; h <= 23; h++)
-        {
             HourComboBox.Items.Add(h);
-            TestShutdownHourComboBox.Items.Add(h);
-        }
         for (int m = 0; m < 60; m++)
-        {
             MinuteComboBox.Items.Add(m);
-            TestShutdownMinuteComboBox.Items.Add(m);
-        }
-
-        DebugTestSection.Visibility = _viewModel.ShowTestShutdownSettings
-            ? Visibility.Visible
-            : Visibility.Collapsed;
 
         _viewModel.Load(config, scheduler.NextReminder, todayCancelled);
     }
@@ -131,7 +121,6 @@ public partial class SettingsWindow : Window
         }
 
         // Persistence succeeded — update runtime scheduler once.
-        ShutdownPolicy.ApplyDebugFixedShutdownOverride(plan.DebugFixedShutdownTime);
         _scheduler.UpdatePlan(plan);
 
         // Apply today ON/OFF after plan update (skip or restore for local calendar day).

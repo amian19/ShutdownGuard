@@ -3,9 +3,7 @@ using ShutdownGuard.Models;
 namespace ShutdownGuard.Core;
 
 /// <summary>
-/// Product-level domain rules.
-/// Default fixed shutdown is 22:00; optional test override via
-/// <see cref="ApplyDebugFixedShutdownOverride"/>.
+/// Product-level domain rules. Fixed shutdown is always 22:00.
 /// </summary>
 public static class ShutdownPolicy
 {
@@ -15,16 +13,14 @@ public static class ShutdownPolicy
     private static TimeOnly? _debugFixedShutdownOverride;
 
     /// <summary>
-    /// Runtime shutdown clock used by Scheduler / Session / Coordinator.
+    /// Runtime shutdown clock. Product builds always use 22:00;
+    /// unit tests may temporarily override via <see cref="ApplyDebugFixedShutdownOverride"/>.
     /// </summary>
     public static TimeOnly EffectiveFixedShutdownTime
         => _debugFixedShutdownOverride ?? FixedShutdownTime;
 
-    /// <summary>
-    /// Optional test shutdown clock (used by the "测试关机时间" setting).
-    /// Pass null to restore product 22:00.
-    /// </summary>
-    public static void ApplyDebugFixedShutdownOverride(TimeOnly? overrideTime)
+    /// <summary>Test-only: set or clear a temporary shutdown clock override.</summary>
+    internal static void ApplyDebugFixedShutdownOverride(TimeOnly? overrideTime)
         => _debugFixedShutdownOverride = overrideTime;
 
     /// <summary>Test helper — clears any override.</summary>

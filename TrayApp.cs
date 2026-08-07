@@ -76,7 +76,6 @@ public sealed class TrayApp : IAsyncDisposable
         _trayInitialized = true;
 
         _session.UpdateDryRunDisplay(_config.Shutdown.DryRun);
-        ShutdownPolicy.ApplyDebugFixedShutdownOverride(_config.Shutdown.DebugFixedShutdownTime);
         _scheduler.UpdatePlan(_config.Shutdown);
 
         AppLogger.Info("Config loaded");
@@ -130,7 +129,6 @@ public sealed class TrayApp : IAsyncDisposable
         _configProvider.Update(newConfig);
 
         _session.UpdateDryRunDisplay(newConfig.Shutdown.DryRun);
-        ShutdownPolicy.ApplyDebugFixedShutdownOverride(newConfig.Shutdown.DebugFixedShutdownTime);
         _scheduler.UpdatePlan(newConfig.Shutdown);
 
         // Enabled is always forced on; skip-today is handled via CancelToday / RestoreToday.
@@ -302,7 +300,6 @@ public sealed class TrayApp : IAsyncDisposable
             _config = _store.Load();
             _configProvider.Update(_config);
             _session.UpdateDryRunDisplay(_config.Shutdown.DryRun);
-            ShutdownPolicy.ApplyDebugFixedShutdownOverride(_config.Shutdown.DebugFixedShutdownTime);
             RefreshTray();
         };
         _settingsWindow.Show();
