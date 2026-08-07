@@ -11,7 +11,6 @@ namespace ShutdownGuard.ViewModels;
 /// </summary>
 public sealed class SettingsViewModel : INotifyPropertyChanged
 {
-    private bool _enabled;
     private int _reminderHour;
     private int _reminderMinute;
     private bool _useTestShutdownTime;
@@ -19,15 +18,24 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private int _testShutdownMinute;
     private string _nextReminderText = "无";
     private string _scheduledShutdownText = "无";
+    private bool _todayWillShutdown = true;
     private string? _validationError;
 
     /// <summary>Always show test-shutdown controls in settings (for trial builds).</summary>
     public bool ShowTestShutdownSettings => true;
 
+    /// <summary>Product rule: auto-shutdown is always on.</summary>
     public bool Enabled
     {
-        get => _enabled;
-        set { _enabled = value; OnPropertyChanged(); }
+        get => true;
+        set { /* Removed: use TodayWillShutdown instead. */ }
+    }
+
+    /// <summary>ON = shut down today; OFF = skip today (restores tomorrow).</summary>
+    public bool TodayWillShutdown
+    {
+        get => _todayWillShutdown;
+        set { _todayWillShutdown = value; OnPropertyChanged(); }
     }
 
     public int ReminderHour
@@ -106,7 +114,6 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public void Load(AppConfig config, DateTimeOffset? nextReminder, bool todayCancelled = false)
     {
-        _enabled = config.Shutdown.Enabled;
         _reminderHour = config.Shutdown.ReminderStartTime.Hour;
         _reminderMinute = config.Shutdown.ReminderStartTime.Minute;
 
@@ -124,11 +131,13 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         }
 
         _validationError = null;
-        _nextReminderText = FormatNextReminder(nextReminder, config.Shutdown.Enabled, todayCancelled);
+        _todayWillShutdown = !todayCancelled;
+        _nextReminderText = FormatNextReminder(nextReminder, enabled: true, todayCancelled);
         _scheduledShutdownText = FormatScheduledShutdown(
-            nextReminder, config.Shutdown.Enabled, todayCancelled, ResolveShutdownTimeForEdit());
+            nextReminder, enabled: true, todayCancelled, ResolveShutdownTimeForEdit());
 
         OnPropertyChanged(nameof(Enabled));
+        OnPropertyChanged(nameof(TodayWillShutdown));
         OnPropertyChanged(nameof(ReminderHour));
         OnPropertyChanged(nameof(ReminderMinute));
         OnPropertyChanged(nameof(UseTestShutdownTime));
@@ -143,7 +152,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         return new ShutdownPlan
         {
-            Enabled = _enabled,
+            Enabled = true,
             ReminderStartTime = new TimeOnly(_reminderHour, _reminderMinute),
             DryRun = false,
             DebugFixedShutdownTime = _useTestShutdownTime

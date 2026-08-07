@@ -32,5 +32,7 @@ public sealed class MemoryDailyCancellationStore : IDailyCancellationStore
         CancelledDate = date;
     }
 
+    public void ClearCancelledDate() => CancelledDate = null;
+
     public void Clear() => CancelledDate = null;
 }

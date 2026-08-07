@@ -51,6 +51,19 @@ public class FileDailyCancellationStoreTests : IDisposable
     }
 
     [Fact]
+    public void ClearCancelledDate_RemovesPersistedCancel()
+    {
+        var store = new FileDailyCancellationStore(_dir);
+        store.SaveCancelledDate(new DateOnly(2026, 8, 6));
+        store.ClearCancelledDate();
+
+        Assert.False(File.Exists(store.StatePath));
+        Assert.Equal(
+            DailyCancellationStatus.NotCancelled,
+            store.ReadCancellationState(new DateOnly(2026, 8, 6)).Status);
+    }
+
+    [Fact]
     public void YesterdayCancelled_TodayNotCancelled()
     {
         var store = new FileDailyCancellationStore(_dir);

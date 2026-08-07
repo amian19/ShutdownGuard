@@ -180,7 +180,7 @@ public sealed class ReminderSessionController : IAsyncDisposable
     /// <summary>
     /// Disables today's shutdown the same way CancelToday does for persistence:
     /// writes CancelledShutdownDate for the local calendar day, then ends the session.
-    /// Next calendar day the date expires and reminders work again once Enabled=true.
+    /// Next calendar day the date expires and reminders work again.
     /// Persistence is best-effort — session is always dismissed.
     /// </summary>
     public void SuppressTodayAndDismiss()

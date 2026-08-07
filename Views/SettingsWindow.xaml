@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="ShutdownGuard"
-        Width="420" Height="560"
+        Width="420" Height="480"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
         Background="#F5F6F8">
@@ -40,20 +40,18 @@
 
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel>
-                <!-- Auto shutdown -->
-                <TextBlock Text="自动关机"
-                           FontSize="14" FontWeight="SemiBold"
-                           Foreground="{StaticResource TitleBrush}"
-                           Margin="0,0,0,10"/>
+                <!-- Today shutdown: ON = shut down today, OFF = skip today -->
                 <Grid Margin="0,0,0,20">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="启用自动关机"
+                    <TextBlock Text="今日关机"
+                               FontSize="14" FontWeight="SemiBold"
+                               Foreground="{StaticResource TitleBrush}"
                                VerticalAlignment="Center"/>
                     <ui:ToggleSwitch Grid.Column="1"
-                                     IsChecked="{Binding Enabled, Mode=TwoWay}"/>
+                                     IsChecked="{Binding TodayWillShutdown, Mode=TwoWay}"/>
                 </Grid>
 
                 <!-- Reminder -->
@@ -64,7 +62,6 @@
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                     <ComboBox x:Name="HourComboBox"
                               Width="72" Height="32"
-                              IsEnabled="{Binding Enabled}"
                               SelectedItem="{Binding ReminderHour, Mode=TwoWay}"
                               ItemStringFormat="{}{0:D2}"/>
                     <TextBlock Text=":"
@@ -73,14 +70,9 @@
                                Margin="8,0"/>
                     <ComboBox x:Name="MinuteComboBox"
                               Width="72" Height="32"
-                              IsEnabled="{Binding Enabled}"
                               SelectedItem="{Binding ReminderMinute, Mode=TwoWay}"
                               ItemStringFormat="{}{0:D2}"/>
                 </StackPanel>
-                <TextBlock Text="到点后进入提醒期，直到当天固定关机时间。"
-                           FontSize="11"
-                           Foreground="{StaticResource HintBrush}"
-                           Margin="0,0,0,4"/>
                 <TextBlock x:Name="ValidationErrorText"
                            Text="{Binding ValidationError}"
                            FontSize="11"
@@ -89,7 +81,7 @@
                            Margin="0,0,0,20"/>
 
                 <!-- Fixed + plan status -->
-                <TextBlock Text="关机计划"
+                <TextBlock Text="状态"
                            FontSize="14" FontWeight="SemiBold"
                            Foreground="{StaticResource TitleBrush}"
                            Margin="0,0,0,10"/>
@@ -98,7 +90,7 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="固定关机时间" VerticalAlignment="Center"/>
+                    <TextBlock Text="关机时间" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="1"
                                Text="{Binding FixedShutdownDisplay}"
                                FontSize="15" FontWeight="SemiBold"
@@ -120,7 +112,7 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="本次计划关机" VerticalAlignment="Center"/>
+                    <TextBlock Text="计划关机" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="1"
                                Text="{Binding ScheduledShutdownText}"
                                Foreground="{StaticResource SecondaryBrush}"
@@ -132,16 +124,14 @@
 
                 <!-- Test shutdown clock -->
                 <StackPanel x:Name="DebugTestSection" Margin="0,0,0,20">
-                    <TextBlock Text="开发测试"
-                               FontSize="14" FontWeight="SemiBold"
-                               Foreground="{StaticResource TitleBrush}"
-                               Margin="0,0,0,10"/>
                     <Grid Margin="0,0,0,8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="启用测试关机时间"
+                        <TextBlock Text="测试关机时间"
+                                   FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TitleBrush}"
                                    VerticalAlignment="Center"/>
                         <ui:ToggleSwitch Grid.Column="1"
                                          IsChecked="{Binding UseTestShutdownTime, Mode=TwoWay}"/>
@@ -161,10 +151,6 @@
                                   SelectedItem="{Binding TestShutdownMinute, Mode=TwoWay}"
                                   ItemStringFormat="{}{0:D2}"/>
                     </StackPanel>
-                    <TextBlock Text="开启后可把关机时刻改成任意时间，方便试用（关闭则仍为每天 22:00）。到点会强制关机。"
-                               FontSize="11"
-                               Foreground="{StaticResource HintBrush}"
-                               TextWrapping="Wrap"/>
                 </StackPanel>
 
                 <!-- System -->

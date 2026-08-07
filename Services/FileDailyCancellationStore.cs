@@ -106,4 +106,23 @@ public sealed class FileDailyCancellationStore : IDailyCancellationStore
             File.Move(tmp, _statePath, overwrite: true);
         }
     }
+
+    public void ClearCancelledDate()
+    {
+        lock (_lock)
+        {
+            if (!File.Exists(_statePath))
+                return;
+
+            try
+            {
+                File.Delete(_statePath);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error($"Failed to clear runtime cancel state: {ex.Message}");
+                throw;
+            }
+        }
+    }
 }

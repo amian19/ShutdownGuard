@@ -147,8 +147,10 @@ public class SettingsViewModelTests
         Assert.Equal(new TimeOnly(18, 0), original.Shutdown.ReminderStartTime);
         Assert.True(original.Shutdown.DryRun);
         Assert.False(original.RunAtStartup);
-        // ViewModel ignores attempts to turn autostart off.
+        // ViewModel ignores attempts to turn autostart / global enable off.
         Assert.True(vm.RunAtStartup);
+        Assert.True(vm.Enabled);
+        Assert.True(vm.TodayWillShutdown);
     }
 
     [Fact]
@@ -264,7 +266,7 @@ public class SettingsViewModelTests
     }
 
     [Fact]
-    public void Disabled_ShowsNoNextReminder()
+    public void Load_IgnoresDisabledFlag_AlwaysShowsTodayWillShutdown()
     {
         var config = new AppConfig
         {
@@ -274,8 +276,18 @@ public class SettingsViewModelTests
         var vm = new SettingsViewModel();
         vm.Load(config, null);
 
-        Assert.False(vm.Enabled);
+        Assert.True(vm.Enabled);
+        Assert.True(vm.TodayWillShutdown);
         Assert.Equal("无", vm.NextReminderText);
-        Assert.Equal("无", vm.ScheduledShutdownText);
+        Assert.Contains("22:00", vm.ScheduledShutdownText);
+    }
+
+    [Fact]
+    public void Load_TodayCancelled_ShowsSkipTodayStatus()
+    {
+        var vm = new SettingsViewModel();
+        vm.Load(new AppConfig(), D(2026, 8, 7, 18, 0), todayCancelled: true);
+
+        Assert.False(vm.TodayWillShutdown);
     }
 }

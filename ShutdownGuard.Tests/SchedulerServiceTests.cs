@@ -452,6 +452,20 @@ public class SchedulerServiceTests : ShutdownPolicyTestCleanup
     }
 
     [Fact]
+    public void ClearTodayReminderHandled_RearmsToday()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 10, 0) };
+        var scheduler = new SchedulerService(clock);
+        scheduler.UpdatePlan(DefaultPlan(hour: 18));
+        scheduler.MarkTodayReminderHandled();
+        Assert.Equal(D(2026, 8, 7, 18, 0), scheduler.NextReminder!.Value);
+
+        scheduler.ClearTodayReminderHandled();
+
+        Assert.Equal(D(2026, 8, 6, 18, 0), scheduler.NextReminder!.Value);
+    }
+
+    [Fact]
     public void UpdatePlan_AfterTodayHandled_ChangingReminderKeepsTomorrow()
     {
         var clock = new FakeClock { Now = D(2026, 8, 6, 20, 0) };

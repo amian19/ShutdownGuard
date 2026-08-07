@@ -10,4 +10,6 @@ public interface IDailyCancellationStore
 {
     DailyCancellationReadResult ReadCancellationState(DateOnly day);
     void SaveCancelledDate(DateOnly date);
+    /// <summary>Clears any persisted cancel so today can shut down again.</summary>
+    void ClearCancelledDate();
 }

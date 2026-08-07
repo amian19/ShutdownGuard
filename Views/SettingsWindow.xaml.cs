@@ -12,6 +12,7 @@ public partial class SettingsWindow : Window
     private readonly ConfigStore _store;
     private readonly AppConfig _originalConfig;
     private readonly Func<bool> _isTodayCancelled;
+    private readonly Action<bool> _applyTodayShutdown;
     private readonly SettingsViewModel _viewModel = new();
     private bool _isSaving;
 
@@ -27,7 +28,8 @@ public partial class SettingsWindow : Window
         ConfigStore store,
         AppConfig config,
         bool todayCancelled = false,
-        Func<bool>? isTodayCancelled = null)
+        Func<bool>? isTodayCancelled = null,
+        Action<bool>? applyTodayShutdown = null)
     {
         InitializeComponent();
 
@@ -35,6 +37,7 @@ public partial class SettingsWindow : Window
         _store = store;
         _originalConfig = config;
         _isTodayCancelled = isTodayCancelled ?? (() => todayCancelled);
+        _applyTodayShutdown = applyTodayShutdown ?? (_ => { });
 
         DataContext = _viewModel;
 
@@ -131,11 +134,13 @@ public partial class SettingsWindow : Window
         ShutdownPolicy.ApplyDebugFixedShutdownOverride(plan.DebugFixedShutdownTime);
         _scheduler.UpdatePlan(plan);
 
-        // Today already cancelled: keep "明天" — do not let a ReminderStart change revive today.
-        if (_isTodayCancelled())
-            _scheduler.MarkTodayReminderHandled();
+        // Apply today ON/OFF after plan update (skip or restore for local calendar day).
+        _applyTodayShutdown(_viewModel.TodayWillShutdown);
 
         var cancelled = _isTodayCancelled();
+        if (cancelled)
+            _scheduler.MarkTodayReminderHandled();
+
         _viewModel.NextReminderText = SettingsViewModel.FormatNextReminder(
             _scheduler.NextReminder, plan.Enabled, cancelled);
         _viewModel.ScheduledShutdownText = SettingsViewModel.FormatScheduledShutdown(
@@ -144,7 +149,7 @@ public partial class SettingsWindow : Window
         AppLogger.Info(
             $"Settings saved: Enabled={plan.Enabled}, " +
             $"ReminderStart={plan.ReminderStartTime:HH:mm}, " +
-            $"DryRun=false, RunAtStartup=true");
+            $"TodayWillShutdown={_viewModel.TodayWillShutdown}, RunAtStartup=true");
 
         Saved?.Invoke(this, EventArgs.Empty);
     }

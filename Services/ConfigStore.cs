@@ -124,6 +124,9 @@ public sealed class ConfigStore
             else if (enabledEl.ValueKind == JsonValueKind.False) config.Shutdown.Enabled = false;
         }
 
+        // Product rule: auto-shutdown is always on; "今日不关机" uses state.json instead.
+        config.Shutdown.Enabled = true;
+
         // Product rule: DryRun removed — always real shutdown.
         config.Shutdown.DryRun = false;
 

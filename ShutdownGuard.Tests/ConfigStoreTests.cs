@@ -73,6 +73,21 @@ public class ConfigStoreTests : IDisposable
     }
 
     [Fact]
+    public void Load_EnabledFalseInJson_ForcedTrue()
+    {
+        Directory.CreateDirectory(_testDir);
+        File.WriteAllText(Path.Combine(_testDir, "config.json"), """
+            {
+              "shutdown": { "enabled": false, "reminderStartTime": "18:00:00", "dryRun": true }
+            }
+            """);
+
+        var config = new ConfigStore(_testDir).Load();
+        Assert.True(config.Shutdown.Enabled);
+        Assert.False(config.Shutdown.DryRun);
+    }
+
+    [Fact]
     public void Load_OldShutdownTime_GreaterOrEqual22_FallsBackTo1800()
     {
         Directory.CreateDirectory(_testDir);

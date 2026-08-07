@@ -76,6 +76,14 @@ public sealed class TrayApp : IAsyncDisposable
         AppLogger.Info("Config loaded");
         AppLogger.Info("Scheduler started");
 
+        // Product rule: auto-shutdown is always on; skip-today uses state.json.
+        if (!_config.Shutdown.Enabled)
+        {
+            _config.Shutdown.Enabled = true;
+            try { _store.Save(_config); } catch { /* best-effort */ }
+            _configProvider.Update(_config);
+        }
+
         _scheduler.Start();
 
         // Restart with today already cancelled → no catch-up; NextReminder = tomorrow.
@@ -116,14 +124,7 @@ public sealed class TrayApp : IAsyncDisposable
         ShutdownPolicy.ApplyDebugFixedShutdownOverride(newConfig.Shutdown.DebugFixedShutdownTime);
         _scheduler.UpdatePlan(newConfig.Shutdown);
 
-        if (!newConfig.Shutdown.Enabled)
-        {
-            // Same-day: no more reminders; next day cancel date expires automatically.
-            _session.SuppressTodayAndDismiss();
-            _scheduler.MarkTodayReminderHandled();
-            _reminderWindow?.Hide();
-        }
-
+        // Enabled is always forced on; skip-today is handled via CancelToday / RestoreToday.
         RefreshTray();
     }
 
@@ -138,25 +139,22 @@ public sealed class TrayApp : IAsyncDisposable
             return $"ShutdownGuard — {exec.Message}";
         }
 
-        if (!_config.Shutdown.Enabled)
-            return "ShutdownGuard — 已停用";
-
         if (IsTodayCancelled())
-            return "ShutdownGuard — 已取消本次关机";
+            return "ShutdownGuard — 今日不关机";
 
         var session = _session.Current;
         if (session.Phase == ReminderSessionPhase.Active)
             return $"ShutdownGuard — 提醒中，{session.FixedShutdownAt:HH:mm} 关机";
 
         if (session.Phase == ReminderSessionPhase.Cancelled)
-            return "ShutdownGuard — 已取消本次关机";
+            return "ShutdownGuard — 今日不关机";
 
         if (session.Phase == ReminderSessionPhase.Due)
             return "ShutdownGuard — 已到达关机时间";
 
         var next = _scheduler.NextReminder;
         if (next is null)
-            return "ShutdownGuard — 已停用";
+            return "ShutdownGuard — 等待计划";
 
         return $"ShutdownGuard — 下次提醒: {next:HH:mm}";
     }
@@ -179,7 +177,7 @@ public sealed class TrayApp : IAsyncDisposable
 
         menu.Items.Add(new Separator());
 
-        var statusText = _config.Shutdown.Enabled ? "已启用" : "已停用";
+        var statusText = IsTodayCancelled() ? "今日不关机" : "今日将关机";
         var session = _session.Current;
         var exec = _execution.Current;
 
@@ -197,11 +195,11 @@ public sealed class TrayApp : IAsyncDisposable
             detail = session.Phase switch
             {
                 ReminderSessionPhase.Active => $"提醒中 → {session.FixedShutdownAt:HH:mm}",
-                ReminderSessionPhase.Cancelled => "已取消本次",
+                ReminderSessionPhase.Cancelled => "已取消今日",
                 ReminderSessionPhase.Due => "已到关机时间",
-                _ when IsTodayCancelled() => "已取消本次",
+                _ when IsTodayCancelled() => "已取消今日",
                 _ => SettingsViewModel.FormatNextReminder(
-                    _scheduler.NextReminder, _config.Shutdown.Enabled)
+                    _scheduler.NextReminder, enabled: true)
             };
         }
 
@@ -230,12 +228,18 @@ public sealed class TrayApp : IAsyncDisposable
         settingsItem.Click += (_, _) => OpenSettings();
         menu.Items.Add(settingsItem);
 
-        var toggleItem = new MenuItem
+        if (IsTodayCancelled())
         {
-            Header = _config.Shutdown.Enabled ? "停用自动关机" : "启用自动关机"
-        };
-        toggleItem.Click += (_, _) => ToggleEnabled();
-        menu.Items.Add(toggleItem);
+            var restoreItem = new MenuItem { Header = "恢复今日关机" };
+            restoreItem.Click += (_, _) => RestoreTodayShutdown();
+            menu.Items.Add(restoreItem);
+        }
+        else
+        {
+            var skipItem = new MenuItem { Header = "今日不关机" };
+            skipItem.Click += (_, _) => SkipTodayShutdown();
+            menu.Items.Add(skipItem);
+        }
 
         menu.Items.Add(new Separator());
 
@@ -275,7 +279,8 @@ public sealed class TrayApp : IAsyncDisposable
             _store,
             _config,
             todayCancelled: IsTodayCancelled(),
-            isTodayCancelled: IsTodayCancelled);
+            isTodayCancelled: IsTodayCancelled,
+            applyTodayShutdown: ApplyTodayShutdownFromSettings);
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         _settingsWindow.Saved += (_, _) =>
         {
@@ -283,15 +288,22 @@ public sealed class TrayApp : IAsyncDisposable
             _configProvider.Update(_config);
             _session.UpdateDryRunDisplay(_config.Shutdown.DryRun);
             ShutdownPolicy.ApplyDebugFixedShutdownOverride(_config.Shutdown.DebugFixedShutdownTime);
-            if (!_config.Shutdown.Enabled)
-            {
-                _session.SuppressTodayAndDismiss();
-                _scheduler.MarkTodayReminderHandled();
-                _reminderWindow?.Hide();
-            }
             RefreshTray();
         };
         _settingsWindow.Show();
+    }
+
+    private void ApplyTodayShutdownFromSettings(bool todayWillShutdown)
+    {
+        if (todayWillShutdown)
+        {
+            if (IsTodayCancelled())
+                RestoreTodayShutdown();
+        }
+        else if (!IsTodayCancelled())
+        {
+            SkipTodayShutdown();
+        }
     }
 
     private bool IsTodayCancelled()
@@ -299,6 +311,35 @@ public sealed class TrayApp : IAsyncDisposable
         var today = DateOnly.FromDateTime(DateTime.Now);
         return _cancellationStore.ReadCancellationState(today).Status
             == DailyCancellationStatus.Cancelled;
+    }
+
+    private void SkipTodayShutdown()
+    {
+        // Works before or during the reminder window — persists cancel for the local day.
+        _session.SuppressTodayAndDismiss();
+        _scheduler.MarkTodayReminderHandled();
+        _reminderWindow?.Hide();
+        AppLogger.Info("Today shutdown skipped via tray (今日不关机)");
+        RefreshTray();
+    }
+
+    private void RestoreTodayShutdown()
+    {
+        try
+        {
+            _cancellationStore.ClearCancelledDate();
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"Failed to restore today shutdown: {ex.Message}");
+            return;
+        }
+
+        // Drop in-memory cancelled/idle session so a re-entry can begin cleanly.
+        _session.Dismiss();
+        _scheduler.ClearTodayReminderHandled();
+        AppLogger.Info("Today shutdown restored via tray (恢复今日关机)");
+        RefreshTray();
     }
 
     private void ShowReminderWindow()
@@ -311,25 +352,6 @@ public sealed class TrayApp : IAsyncDisposable
 
         _reminderWindow = new ReminderWindow(_session);
         _reminderWindow.Show();
-    }
-
-    private void ToggleEnabled()
-    {
-        var newEnabled = !_config.Shutdown.Enabled;
-
-        ApplyConfig(new AppConfig
-        {
-            RunAtStartup = _config.RunAtStartup,
-            Shutdown = new ShutdownPlan
-            {
-                Enabled = newEnabled,
-                ReminderStartTime = _config.Shutdown.ReminderStartTime,
-                DryRun = false,
-                DebugFixedShutdownTime = _config.Shutdown.DebugFixedShutdownTime
-            }
-        });
-
-        AppLogger.Info($"Scheduler {(newEnabled ? "Enabled" : "Disabled")} (via tray)");
     }
 
     private void OnReminderWindowStarted(DateTimeOffset occurrence)

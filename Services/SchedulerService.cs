@@ -100,6 +100,35 @@ public sealed class SchedulerService : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Clears today's "already handled" mark so the scheduler may re-arm today
+    /// (e.g. user restores "今日关机" after cancelling early).
+    /// No-op if nothing was marked for today.
+    /// </summary>
+    public void ClearTodayReminderHandled()
+    {
+        lock (_lock)
+        {
+            var todayReminder = _policy.GetTodayReminder(_plan, _clock.Now);
+            if (todayReminder is null)
+                return;
+
+            if (_lastReminderOccurrence is not { } last
+                || last.Year != todayReminder.Value.Year
+                || last.Month != todayReminder.Value.Month
+                || last.Day != todayReminder.Value.Day)
+            {
+                return;
+            }
+
+            _lastReminderOccurrence = null;
+            _armedOccurrence = ComputeArmedOccurrence(ReminderWindowEntryReason.PlanUpdate);
+            SyncNextReminder();
+            AppLogger.Info(
+                $"Today's reminder mark cleared — next: {_armedOccurrence:yyyy-MM-dd HH:mm}");
+        }
+    }
+
     // ── Lifecycle ────────────────────────────────────────────────
 
     public void Start()
