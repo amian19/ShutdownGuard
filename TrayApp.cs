@@ -13,6 +13,10 @@ using MenuItem = System.Windows.Controls.MenuItem;
 using TextBlock = System.Windows.Controls.TextBlock;
 using StackPanel = System.Windows.Controls.StackPanel;
 using Orientation = System.Windows.Controls.Orientation;
+using MessageBox = System.Windows.MessageBox;
+using MessageBoxButton = System.Windows.MessageBoxButton;
+using MessageBoxImage = System.Windows.MessageBoxImage;
+using MessageBoxResult = System.Windows.MessageBoxResult;
 
 namespace ShutdownGuard;
 
@@ -31,6 +35,8 @@ public sealed class TrayApp : IAsyncDisposable
     private ReminderWindow? _reminderWindow;
     private bool _trayInitialized;
     private bool _disposed;
+    private readonly GitHubUpdateService _updates = new();
+    private int _updateBusy;
 
     private static readonly BitmapImage _iconSource =
         new(new Uri("pack://application:,,,/Assets/ShutdownGuard.ico", UriKind.Absolute));
@@ -92,6 +98,9 @@ public sealed class TrayApp : IAsyncDisposable
 
         EnsureForcedAutostart();
         RefreshTray();
+
+        // Background: only prompts when a newer Release exists.
+        _ = CheckForUpdatesOnStartupAsync();
     }
 
     private void EnsureForcedAutostart()
@@ -240,6 +249,12 @@ public sealed class TrayApp : IAsyncDisposable
             skipItem.Click += (_, _) => SkipTodayShutdown();
             menu.Items.Add(skipItem);
         }
+
+        menu.Items.Add(new Separator());
+
+        var updateItem = new MenuItem { Header = $"检查更新（当前 {AppVersion.Display}）" };
+        updateItem.Click += (_, _) => _ = CheckForUpdatesInteractiveAsync();
+        menu.Items.Add(updateItem);
 
         menu.Items.Add(new Separator());
 
@@ -432,6 +447,159 @@ public sealed class TrayApp : IAsyncDisposable
             if (_disposed) return;
             RefreshTray();
         });
+    }
+
+    private async Task CheckForUpdatesOnStartupAsync()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(8));
+            if (_disposed) return;
+
+            if (Interlocked.CompareExchange(ref _updateBusy, 1, 0) != 0)
+                return;
+
+            UpdateCheckResult result;
+            try
+            {
+                result = await _updates.CheckAsync();
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _updateBusy, 0);
+            }
+
+            if (_disposed) return;
+            if (result.Status != UpdateCheckStatus.UpdateAvailable)
+                return;
+
+            await Application.Current.Dispatcher.InvokeAsync(() =>
+                PromptAndMaybeApplyUpdate(result));
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"Startup update check failed: {ex.Message}");
+            Interlocked.Exchange(ref _updateBusy, 0);
+        }
+    }
+
+    private async Task CheckForUpdatesInteractiveAsync()
+    {
+        if (Interlocked.CompareExchange(ref _updateBusy, 1, 0) != 0)
+        {
+            MessageBox.Show(
+                "正在检查或下载更新，请稍候。",
+                "ShutdownGuard",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            var result = await _updates.CheckAsync();
+            if (_disposed) return;
+
+            var handOffToDownload = false;
+            await Application.Current.Dispatcher.InvokeAsync(() =>
+            {
+                switch (result.Status)
+                {
+                    case UpdateCheckStatus.UpToDate:
+                        MessageBox.Show(
+                            $"已是最新版本（{AppVersion.Display}）。",
+                            "ShutdownGuard",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Information);
+                        break;
+                    case UpdateCheckStatus.Failed:
+                        MessageBox.Show(
+                            result.ErrorMessage ?? "检查更新失败。",
+                            "ShutdownGuard — 检查更新",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Warning);
+                        break;
+                    case UpdateCheckStatus.UpdateAvailable:
+                        handOffToDownload = true;
+                        Interlocked.Exchange(ref _updateBusy, 0);
+                        PromptAndMaybeApplyUpdate(result);
+                        break;
+                }
+            });
+
+            if (!handOffToDownload)
+                Interlocked.Exchange(ref _updateBusy, 0);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"Interactive update check failed: {ex.Message}");
+            MessageBox.Show(
+                $"检查更新失败：{ex.Message}",
+                "ShutdownGuard — 检查更新",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            Interlocked.Exchange(ref _updateBusy, 0);
+        }
+    }
+
+    private void PromptAndMaybeApplyUpdate(UpdateCheckResult result)
+    {
+        var latest = result.LatestVersion?.ToString() ?? "?";
+        var answer = MessageBox.Show(
+            $"发现新版本 {latest}（当前 {AppVersion.Display}）。\n\n下载并更新？更新时程序会自动重启。",
+            "ShutdownGuard — 发现更新",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+
+        if (answer != MessageBoxResult.Yes)
+            return;
+
+        _ = DownloadAndApplyUpdateAsync(result);
+    }
+
+    private async Task DownloadAndApplyUpdateAsync(UpdateCheckResult result)
+    {
+        if (string.IsNullOrWhiteSpace(result.DownloadUrl))
+            return;
+
+        if (Interlocked.CompareExchange(ref _updateBusy, 1, 0) != 0)
+            return;
+
+        try
+        {
+            var dest = UpdateApplier.PrepareDownloadedPath();
+            AppLogger.Info($"Downloading update from {result.DownloadUrl}");
+            await _updates.DownloadAsync(result.DownloadUrl, dest);
+
+            UpdateApplier.LaunchReplaceAndRestart(dest);
+
+            await Application.Current.Dispatcher.InvokeAsync(() =>
+            {
+                MessageBox.Show(
+                    "更新已下载，程序即将重启以完成安装。",
+                    "ShutdownGuard",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            });
+
+            await ShutdownAppAsync();
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"Update download/apply failed: {ex.Message}");
+            await Application.Current.Dispatcher.InvokeAsync(() =>
+            {
+                MessageBox.Show(
+                    $"更新失败：{ex.Message}",
+                    "ShutdownGuard — 更新",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            });
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _updateBusy, 0);
+        }
     }
 
     private void RefreshTray()

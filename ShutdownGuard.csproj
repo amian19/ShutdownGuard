@@ -11,7 +11,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>ShutdownGuard</AssemblyName>
     <ApplicationIcon>Assets\ShutdownGuard.ico</ApplicationIcon>
-    <Version>1.0.1</Version>
+    <Version>1.1.0</Version>
     <Company>ShutdownGuard</Company>
     <Product>ShutdownGuard</Product>
     <Description>Windows auto-shutdown scheduler — reminds and shuts down at fixed times.</Description>
