@@ -115,7 +115,10 @@ public sealed class GitHubUpdateService
 
     private static HttpClient CreateClient()
     {
-        var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+        // Bypass system/env proxies (e.g. stale Clash 127.0.0.1:7890) so update
+        // checks work on machines where a local proxy is configured but not running.
+        var handler = new HttpClientHandler { UseProxy = false };
+        var client = new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(5) };
         client.DefaultRequestHeaders.UserAgent.Add(
             new ProductInfoHeaderValue("ShutdownGuard", AppVersion.Display));
         client.DefaultRequestHeaders.Accept.Add(
