@@ -2,6 +2,7 @@ namespace ShutdownGuard.Models;
 
 public sealed class AppConfig
 {
-    public bool RunAtStartup { get; set; } = false;
+    /// <summary>Product rule: always true — autostart is mandatory.</summary>
+    public bool RunAtStartup { get; set; } = true;
     public ShutdownPlan Shutdown { get; set; } = new();
 }

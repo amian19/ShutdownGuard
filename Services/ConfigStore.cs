@@ -71,7 +71,7 @@ public sealed class ConfigStore
     {
         return new AppConfig
         {
-            RunAtStartup = false,
+            RunAtStartup = true,
             Shutdown = new ShutdownPlan
             {
                 Enabled = true,
@@ -83,12 +83,13 @@ public sealed class ConfigStore
 
     /// <summary>
     /// Corrupt config — safety first: do not suddenly enable auto-shutdown.
+    /// Autostart is still forced on by TrayApp.Start regardless of this flag.
     /// </summary>
     internal static AppConfig CreateCorruptFallback()
     {
         return new AppConfig
         {
-            RunAtStartup = false,
+            RunAtStartup = true,
             Shutdown = new ShutdownPlan
             {
                 Enabled = false,
@@ -160,6 +161,11 @@ public sealed class ConfigStore
                 config.Shutdown.ReminderStartTime = ShutdownPolicy.DefaultReminderStartTime;
             }
         }
+
+#if DEBUG
+        if (TryReadTimeOnly(shutdownEl, "debugFixedShutdownTime", out var debugShutdown))
+            config.Shutdown.DebugFixedShutdownTime = debugShutdown;
+#endif
 
         return config;
     }

@@ -70,6 +70,7 @@ public sealed class TrayApp : IAsyncDisposable
         _trayInitialized = true;
 
         _session.UpdateDryRunDisplay(_config.Shutdown.DryRun);
+        ShutdownPolicy.ApplyDebugFixedShutdownOverride(_config.Shutdown.DebugFixedShutdownTime);
         _scheduler.UpdatePlan(_config.Shutdown);
 
         AppLogger.Info("Config loaded");
@@ -81,7 +82,28 @@ public sealed class TrayApp : IAsyncDisposable
         if (IsTodayCancelled())
             _scheduler.MarkTodayReminderHandled();
 
+        EnsureForcedAutostart();
         RefreshTray();
+    }
+
+    private void EnsureForcedAutostart()
+    {
+        try
+        {
+            AutostartManager.SetEnabled(true);
+            if (!_config.RunAtStartup)
+            {
+                _config.RunAtStartup = true;
+                _store.Save(_config);
+                _configProvider.Update(_config);
+            }
+
+            AppLogger.Info("Autostart forced on (HKCU\\...\\Run\\ShutdownGuard)");
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"Failed to force autostart: {ex.Message}");
+        }
     }
 
     private void ApplyConfig(AppConfig newConfig)
@@ -91,6 +113,7 @@ public sealed class TrayApp : IAsyncDisposable
         _configProvider.Update(newConfig);
 
         _session.UpdateDryRunDisplay(newConfig.Shutdown.DryRun);
+        ShutdownPolicy.ApplyDebugFixedShutdownOverride(newConfig.Shutdown.DebugFixedShutdownTime);
         _scheduler.UpdatePlan(newConfig.Shutdown);
 
         if (!newConfig.Shutdown.Enabled)
@@ -194,7 +217,7 @@ public sealed class TrayApp : IAsyncDisposable
 
         menu.Items.Add(new MenuItem
         {
-            Header = $"固定关机：{ShutdownPolicy.FixedShutdownTime:HH:mm}",
+            Header = $"固定关机：{ShutdownPolicy.EffectiveFixedShutdownTime:HH:mm}",
             IsEnabled = false
         });
 
@@ -269,6 +292,7 @@ public sealed class TrayApp : IAsyncDisposable
             _config = _store.Load();
             _configProvider.Update(_config);
             _session.UpdateDryRunDisplay(_config.Shutdown.DryRun);
+            ShutdownPolicy.ApplyDebugFixedShutdownOverride(_config.Shutdown.DebugFixedShutdownTime);
             if (!_config.Shutdown.Enabled)
             {
                 _session.SuppressTodayAndDismiss();

@@ -27,7 +27,7 @@ public class ConfigStoreTests : IDisposable
         var store = new ConfigStore(_testDir);
         var config = store.Load();
 
-        Assert.False(config.RunAtStartup);
+        Assert.True(config.RunAtStartup);
         Assert.True(config.Shutdown.Enabled);
         Assert.True(config.Shutdown.DryRun);
         Assert.Equal(new TimeOnly(18, 0), config.Shutdown.ReminderStartTime);
@@ -42,7 +42,7 @@ public class ConfigStoreTests : IDisposable
         var store = new ConfigStore(_testDir);
         var config = store.Load();
 
-        Assert.False(config.RunAtStartup);
+        Assert.True(config.RunAtStartup);
         Assert.False(config.Shutdown.Enabled);
         Assert.True(config.Shutdown.DryRun);
         Assert.Equal(new TimeOnly(18, 0), config.Shutdown.ReminderStartTime);

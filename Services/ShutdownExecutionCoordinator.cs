@@ -103,8 +103,8 @@ public sealed class ShutdownExecutionCoordinator : IAsyncDisposable
 
         var expectedShutdown = new DateTimeOffset(
             due.OccurrenceDate.Year, due.OccurrenceDate.Month, due.OccurrenceDate.Day,
-            ShutdownPolicy.FixedShutdownTime.Hour,
-            ShutdownPolicy.FixedShutdownTime.Minute,
+            ShutdownPolicy.EffectiveFixedShutdownTime.Hour,
+            ShutdownPolicy.EffectiveFixedShutdownTime.Minute,
             0,
             due.ShutdownAt.Offset);
 

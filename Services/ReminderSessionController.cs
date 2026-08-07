@@ -57,8 +57,8 @@ public sealed class ReminderSessionController : IAsyncDisposable
             var day = DateOnly.FromDateTime(reminderOccurrence.DateTime);
             var shutdownAt = new DateTimeOffset(
                 reminderOccurrence.Year, reminderOccurrence.Month, reminderOccurrence.Day,
-                ShutdownPolicy.FixedShutdownTime.Hour,
-                ShutdownPolicy.FixedShutdownTime.Minute,
+                ShutdownPolicy.EffectiveFixedShutdownTime.Hour,
+                ShutdownPolicy.EffectiveFixedShutdownTime.Minute,
                 0,
                 reminderOccurrence.Offset);
 
@@ -67,7 +67,7 @@ public sealed class ReminderSessionController : IAsyncDisposable
             if (now >= shutdownAt)
             {
                 AppLogger.Info(
-                    $"Reminder session ignored (already past {ShutdownPolicy.FixedShutdownTime:HH:mm}): " +
+                    $"Reminder session ignored (already past {ShutdownPolicy.EffectiveFixedShutdownTime:HH:mm}): " +
                     $"{reminderOccurrence:yyyy-MM-dd HH:mm}");
                 return;
             }

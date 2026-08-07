@@ -23,8 +23,8 @@ public class SettingsViewModelTests
         Assert.Equal(18, vm.ReminderHour);
         Assert.Equal(0, vm.ReminderMinute);
         Assert.True(vm.DryRun);
-        Assert.False(vm.RunAtStartup);
-        Assert.Equal("22 : 00", vm.FixedShutdownDisplay);
+        Assert.True(vm.RunAtStartup);
+        Assert.Equal("22:00", vm.FixedShutdownDisplay);
     }
 
     [Fact]
@@ -45,16 +45,35 @@ public class SettingsViewModelTests
     }
 
     [Fact]
-    public void ReminderHour_CannotReachOrExceed22()
+    public void ReminderHour_CanReach23_ButValidateAgainstShutdown()
     {
         var vm = new SettingsViewModel();
         vm.Load(new AppConfig(), null);
 
         vm.ReminderHour = 22;
-        Assert.Equal(21, vm.ReminderHour);
+        Assert.Equal(22, vm.ReminderHour);
+        Assert.False(vm.TryValidate(out _)); // default shutdown 22:00
 
         vm.ReminderHour = 99;
-        Assert.Equal(21, vm.ReminderHour);
+        Assert.Equal(23, vm.ReminderHour);
+    }
+
+    [Fact]
+    public void UseTestShutdownTime_AllowsReminderJustBeforeTestClock()
+    {
+        var vm = new SettingsViewModel();
+        vm.Load(new AppConfig(), null);
+        vm.UseTestShutdownTime = true;
+        vm.TestShutdownHour = 10;
+        vm.TestShutdownMinute = 35;
+        vm.ReminderHour = 10;
+        vm.ReminderMinute = 33;
+
+        Assert.True(vm.TryValidate(out var error));
+        Assert.Null(error);
+
+        var plan = vm.ToShutdownPlan();
+        Assert.Equal(new TimeOnly(10, 35), plan.DebugFixedShutdownTime);
     }
 
     [Fact]
@@ -122,12 +141,14 @@ public class SettingsViewModelTests
         vm.ReminderHour = 20;
         vm.ReminderMinute = 15;
         vm.DryRun = false;
-        vm.RunAtStartup = true;
+        vm.RunAtStartup = false;
 
         Assert.True(original.Shutdown.Enabled);
         Assert.Equal(new TimeOnly(18, 0), original.Shutdown.ReminderStartTime);
         Assert.True(original.Shutdown.DryRun);
         Assert.False(original.RunAtStartup);
+        // ViewModel ignores attempts to turn autostart off.
+        Assert.True(vm.RunAtStartup);
     }
 
     [Fact]
@@ -221,7 +242,7 @@ public class SettingsViewModelTests
     {
         var vm = new SettingsViewModel();
         vm.Load(new AppConfig(), null);
-        vm.RunAtStartup = true;
+        vm.RunAtStartup = false;
         vm.Enabled = true;
         vm.ReminderHour = 18;
         vm.ReminderMinute = 30;

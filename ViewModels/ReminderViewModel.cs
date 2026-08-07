@@ -84,7 +84,7 @@ public sealed class ReminderViewModel : INotifyPropertyChanged
 
         ShutdownAtText = snapshot.FixedShutdownAt is { } at
             ? $"计划关机时间：{at:HH:mm}"
-            : $"计划关机时间：{ShutdownPolicy.FixedShutdownTime:HH:mm}";
+            : $"计划关机时间：{ShutdownPolicy.EffectiveFixedShutdownTime:HH:mm}";
 
         RemainingText = FormatRemaining(snapshot);
         DryRunText = snapshot.DryRun

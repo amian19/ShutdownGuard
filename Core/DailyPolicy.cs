@@ -31,7 +31,7 @@ public sealed class DailyPolicy
             return null;
 
         var midnight = new DateTimeOffset(now.Year, now.Month, now.Day, 0, 0, 0, now.Offset);
-        return midnight + ShutdownPolicy.FixedShutdownTime.ToTimeSpan();
+        return midnight + ShutdownPolicy.EffectiveFixedShutdownTime.ToTimeSpan();
     }
 
     /// <summary>

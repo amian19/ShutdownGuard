@@ -4,7 +4,7 @@ using Xunit;
 
 namespace ShutdownGuard.Tests;
 
-public class DailyPolicyTests
+public class DailyPolicyTests : ShutdownPolicyTestCleanup
 {
     private readonly DailyPolicy _policy = new();
     private static readonly TimeSpan LocalOffset = DateTimeOffset.Now.Offset;

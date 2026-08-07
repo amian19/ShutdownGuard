@@ -1,4 +1,5 @@
 using System.Windows;
+using ShutdownGuard.Core;
 using ShutdownGuard.Models;
 using ShutdownGuard.Services;
 using ShutdownGuard.ViewModels;
@@ -37,11 +38,21 @@ public partial class SettingsWindow : Window
 
         DataContext = _viewModel;
 
-        // Hours 00..21 (must be < fixed shutdown 22:00); minutes 00..59
-        for (int h = 0; h <= 21; h++)
+        // Reminder hours 00..23 (validated against effective shutdown); minutes 00..59
+        for (int h = 0; h <= 23; h++)
+        {
             HourComboBox.Items.Add(h);
+            TestShutdownHourComboBox.Items.Add(h);
+        }
         for (int m = 0; m < 60; m++)
+        {
             MinuteComboBox.Items.Add(m);
+            TestShutdownMinuteComboBox.Items.Add(m);
+        }
+
+        DebugTestSection.Visibility = _viewModel.IsDebugBuild
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
         _viewModel.Load(config, scheduler.NextReminder, todayCancelled);
 
@@ -99,23 +110,20 @@ public partial class SettingsWindow : Window
         var plan = _viewModel.ToShutdownPlan();
         var desiredConfig = _viewModel.ToAppConfig();
 
-        bool runAtStartupChanged = desiredConfig.RunAtStartup != _originalConfig.RunAtStartup;
-        if (runAtStartupChanged)
+        // Product rule: autostart is mandatory — always (re)apply HKCU Run.
+        try
         {
-            try
-            {
-                AutostartManager.SetEnabled(desiredConfig.RunAtStartup);
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Error($"Autostart update failed: {ex.Message}");
-                MessageBox.Show(
-                    $"更新 Windows 开机启动设置失败：\n{ex.Message}\n\n设置未保存。",
-                    "ShutdownGuard — 错误",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-                return;
-            }
+            AutostartManager.SetEnabled(true);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error($"Autostart force-enable failed: {ex.Message}");
+            MessageBox.Show(
+                $"强制开启开机启动失败：\n{ex.Message}\n\n设置未保存。",
+                "ShutdownGuard — 错误",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
         }
 
         try
@@ -125,28 +133,6 @@ public partial class SettingsWindow : Window
         catch (Exception ex)
         {
             AppLogger.Error($"Config save failed: {ex.Message}");
-
-            if (runAtStartupChanged)
-            {
-                try
-                {
-                    AutostartManager.SetEnabled(_originalConfig.RunAtStartup);
-                }
-                catch (Exception rollbackEx)
-                {
-                    AppLogger.Error($"Autostart rollback also failed: {rollbackEx.Message}");
-                    MessageBox.Show(
-                        $"保存设置失败。\n\n" +
-                        $"配置文件保存错误：{ex.Message}\n" +
-                        $"开机启动设置可能与程序配置不一致。\n" +
-                        $"预期：{(_originalConfig.RunAtStartup ? "已启用" : "已停用")}",
-                        "ShutdownGuard — 错误",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Error);
-                    return;
-                }
-            }
-
             MessageBox.Show(
                 $"保存设置失败：\n{ex.Message}",
                 "ShutdownGuard — 错误",
@@ -156,6 +142,7 @@ public partial class SettingsWindow : Window
         }
 
         // Persistence succeeded — update runtime scheduler once.
+        ShutdownPolicy.ApplyDebugFixedShutdownOverride(plan.DebugFixedShutdownTime);
         _scheduler.UpdatePlan(plan);
 
         // Today already cancelled: keep "明天" — do not let a ReminderStart change revive today.
@@ -171,7 +158,7 @@ public partial class SettingsWindow : Window
         AppLogger.Info(
             $"Settings saved: Enabled={plan.Enabled}, " +
             $"ReminderStart={plan.ReminderStartTime:HH:mm}, " +
-            $"DryRun={plan.DryRun}, RunAtStartup={desiredConfig.RunAtStartup}");
+            $"DryRun={plan.DryRun}, RunAtStartup=true");
 
         Saved?.Invoke(this, EventArgs.Empty);
     }

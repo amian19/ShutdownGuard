@@ -175,7 +175,7 @@ public sealed class SchedulerService : IAsyncDisposable
         var now = _clock.Now;
         var todayShutdownDto = new DateTimeOffset(
             todayReminder.Value.Year, todayReminder.Value.Month, todayReminder.Value.Day,
-            ShutdownPolicy.FixedShutdownTime.Hour, ShutdownPolicy.FixedShutdownTime.Minute, 0,
+            ShutdownPolicy.EffectiveFixedShutdownTime.Hour, ShutdownPolicy.EffectiveFixedShutdownTime.Minute, 0,
             todayReminder.Value.Offset);
 
         if (now < todayReminder.Value)
@@ -225,7 +225,7 @@ public sealed class SchedulerService : IAsyncDisposable
         return reason switch
         {
             ReminderWindowEntryReason.Scheduled =>
-                $"Reminder window started: {armed:yyyy-MM-dd HH:mm}, shutdown scheduled for {ShutdownPolicy.FixedShutdownTime:HH:mm}",
+                $"Reminder window started: {armed:yyyy-MM-dd HH:mm}, shutdown scheduled for {ShutdownPolicy.EffectiveFixedShutdownTime:HH:mm}",
 
             ReminderWindowEntryReason.Startup =>
                 $"Reminder window entered on startup: shutdown scheduled for {shutdownText}",
@@ -294,8 +294,8 @@ public sealed class SchedulerService : IAsyncDisposable
             // Window end for the armed day's plan.
             var dayShutdown = new DateTimeOffset(
                 armed.Value.Year, armed.Value.Month, armed.Value.Day,
-                ShutdownPolicy.FixedShutdownTime.Hour,
-                ShutdownPolicy.FixedShutdownTime.Minute,
+                ShutdownPolicy.EffectiveFixedShutdownTime.Hour,
+                ShutdownPolicy.EffectiveFixedShutdownTime.Minute,
                 0,
                 armed.Value.Offset);
 
@@ -303,7 +303,7 @@ public sealed class SchedulerService : IAsyncDisposable
             {
                 // Slept past the entire reminder window — skip today, no reminder, no shutdown.
                 AppLogger.Info(
-                    $"Reminder window missed (past {ShutdownPolicy.FixedShutdownTime:HH:mm}): " +
+                    $"Reminder window missed (past {ShutdownPolicy.EffectiveFixedShutdownTime:HH:mm}): " +
                     $"{armed.Value:yyyy-MM-dd HH:mm:ss zzz}");
 
                 _lastReminderOccurrence = armed.Value;

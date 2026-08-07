@@ -15,10 +15,19 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private int _reminderHour;
     private int _reminderMinute;
     private bool _dryRun;
-    private bool _runAtStartup;
+    private bool _useTestShutdownTime;
+    private int _testShutdownHour = 22;
+    private int _testShutdownMinute;
     private string _nextReminderText = "无";
     private string _scheduledShutdownText = "无";
     private string? _validationError;
+
+    public bool IsDebugBuild =>
+#if DEBUG
+        true;
+#else
+        false;
+#endif
 
     public bool Enabled
     {
@@ -29,7 +38,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     public int ReminderHour
     {
         get => _reminderHour;
-        set { _reminderHour = Clamp(value, 0, 21); OnPropertyChanged(); }
+        set { _reminderHour = Clamp(value, 0, 23); OnPropertyChanged(); }
     }
 
     public int ReminderMinute
@@ -46,8 +55,27 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public bool RunAtStartup
     {
-        get => _runAtStartup;
-        set { _runAtStartup = value; OnPropertyChanged(); }
+        get => true;
+        set { /* Product rule: always on. */ }
+    }
+
+    /// <summary>DEBUG: use custom test shutdown clock instead of 22:00.</summary>
+    public bool UseTestShutdownTime
+    {
+        get => _useTestShutdownTime;
+        set { _useTestShutdownTime = value; OnPropertyChanged(); OnPropertyChanged(nameof(FixedShutdownDisplay)); }
+    }
+
+    public int TestShutdownHour
+    {
+        get => _testShutdownHour;
+        set { _testShutdownHour = Clamp(value, 0, 23); OnPropertyChanged(); OnPropertyChanged(nameof(FixedShutdownDisplay)); }
+    }
+
+    public int TestShutdownMinute
+    {
+        get => _testShutdownMinute;
+        set { _testShutdownMinute = Clamp(value, 0, 59); OnPropertyChanged(); OnPropertyChanged(nameof(FixedShutdownDisplay)); }
     }
 
     public string NextReminderText
@@ -62,8 +90,16 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set { _scheduledShutdownText = value; OnPropertyChanged(); }
     }
 
-    public string FixedShutdownDisplay =>
-        $"{ShutdownPolicy.FixedShutdownTime.Hour:D2} : {ShutdownPolicy.FixedShutdownTime.Minute:D2}";
+    public string FixedShutdownDisplay
+    {
+        get
+        {
+            var t = ResolveShutdownTimeForEdit();
+            return IsDebugBuild && _useTestShutdownTime
+                ? $"{t:HH:mm}（测试）"
+                : $"{ShutdownPolicy.FixedShutdownTime:HH:mm}";
+        }
+    }
 
     public string? ValidationError
     {
@@ -73,58 +109,73 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    /// <summary>
-    /// Populates the ViewModel from a loaded config and scheduler state.
-    /// Creates a working copy — the original config is not mutated.
-    /// </summary>
     public void Load(AppConfig config, DateTimeOffset? nextReminder, bool todayCancelled = false)
     {
         _enabled = config.Shutdown.Enabled;
         _reminderHour = config.Shutdown.ReminderStartTime.Hour;
         _reminderMinute = config.Shutdown.ReminderStartTime.Minute;
         _dryRun = config.Shutdown.DryRun;
-        _runAtStartup = config.RunAtStartup;
+
+        if (config.Shutdown.DebugFixedShutdownTime is { } debug)
+        {
+            _useTestShutdownTime = true;
+            _testShutdownHour = debug.Hour;
+            _testShutdownMinute = debug.Minute;
+        }
+        else
+        {
+            _useTestShutdownTime = false;
+            _testShutdownHour = ShutdownPolicy.FixedShutdownTime.Hour;
+            _testShutdownMinute = ShutdownPolicy.FixedShutdownTime.Minute;
+        }
+
         _validationError = null;
         _nextReminderText = FormatNextReminder(nextReminder, config.Shutdown.Enabled, todayCancelled);
         _scheduledShutdownText = FormatScheduledShutdown(
-            nextReminder, config.Shutdown.Enabled, todayCancelled);
+            nextReminder, config.Shutdown.Enabled, todayCancelled, ResolveShutdownTimeForEdit());
+
+        OnPropertyChanged(nameof(Enabled));
+        OnPropertyChanged(nameof(ReminderHour));
+        OnPropertyChanged(nameof(ReminderMinute));
+        OnPropertyChanged(nameof(DryRun));
+        OnPropertyChanged(nameof(UseTestShutdownTime));
+        OnPropertyChanged(nameof(TestShutdownHour));
+        OnPropertyChanged(nameof(TestShutdownMinute));
+        OnPropertyChanged(nameof(FixedShutdownDisplay));
+        OnPropertyChanged(nameof(NextReminderText));
+        OnPropertyChanged(nameof(ScheduledShutdownText));
     }
 
-    /// <summary>
-    /// Creates a new ShutdownPlan snapshot from the current ViewModel state.
-    /// Does not mutate any running plan reference.
-    /// </summary>
     public ShutdownPlan ToShutdownPlan()
     {
         return new ShutdownPlan
         {
             Enabled = _enabled,
             ReminderStartTime = new TimeOnly(_reminderHour, _reminderMinute),
-            DryRun = _dryRun
+            DryRun = _dryRun,
+            DebugFixedShutdownTime = IsDebugBuild && _useTestShutdownTime
+                ? new TimeOnly(_testShutdownHour, _testShutdownMinute)
+                : null
         };
     }
 
-    /// <summary>
-    /// Creates a new AppConfig snapshot from the current ViewModel state.
-    /// </summary>
     public AppConfig ToAppConfig()
     {
         return new AppConfig
         {
-            RunAtStartup = _runAtStartup,
+            RunAtStartup = true,
             Shutdown = ToShutdownPlan()
         };
     }
 
-    /// <summary>
-    /// Validates ReminderStartTime &lt; fixed shutdown (22:00). Does not silent-correct.
-    /// </summary>
     public bool TryValidate(out string? error)
     {
         var reminder = new TimeOnly(_reminderHour, _reminderMinute);
-        if (!ShutdownPolicy.IsValidReminderStartTime(reminder))
+        var shutdown = ResolveShutdownTimeForEdit();
+
+        if (!ShutdownPolicy.IsValidReminderStartTime(reminder, shutdown))
         {
-            error = $"提醒开始时间必须早于固定关机时间 {ShutdownPolicy.FixedShutdownTime:HH:mm}。";
+            error = $"提醒开始时间必须早于关机时间 {shutdown:HH:mm}。";
             ValidationError = error;
             return false;
         }
@@ -134,26 +185,28 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         return true;
     }
 
-    /// <summary>
-    /// Formats the planned fixed shutdown (22:00 on the same day as NextReminder).
-    /// When today is already cancelled, shows that explicitly instead of "今天 22:00".
-    /// Presentation only — does not participate in shutdown scheduling.
-    /// </summary>
+    private TimeOnly ResolveShutdownTimeForEdit()
+    {
+        if (IsDebugBuild && _useTestShutdownTime)
+            return new TimeOnly(_testShutdownHour, _testShutdownMinute);
+        return ShutdownPolicy.FixedShutdownTime;
+    }
+
     public static string FormatScheduledShutdown(
         DateTimeOffset? nextReminder,
         bool enabled,
-        bool todayCancelled = false)
+        bool todayCancelled = false,
+        TimeOnly? shutdownClock = null)
     {
         if (!enabled || nextReminder is null)
             return "无";
 
+        var clock = shutdownClock ?? ShutdownPolicy.EffectiveFixedShutdownTime;
         var now = DateTimeOffset.Now;
         if (todayCancelled)
         {
-            // Next reminder should already be tomorrow after MarkTodayReminderHandled;
-            // still label clearly when the next shutdown day is tomorrow.
             if (nextReminder.Value.Date > now.Date)
-                return $"明天 {ShutdownPolicy.FixedShutdownTime:HH:mm}（今天已取消）";
+                return $"明天 {clock:HH:mm}（今天已取消）";
 
             return "今天已取消";
         }
@@ -162,18 +215,14 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             nextReminder.Value.Year,
             nextReminder.Value.Month,
             nextReminder.Value.Day,
-            ShutdownPolicy.FixedShutdownTime.Hour,
-            ShutdownPolicy.FixedShutdownTime.Minute,
+            clock.Hour,
+            clock.Minute,
             0,
             nextReminder.Value.Offset);
 
         return FormatRelativeDateTime(shutdown);
     }
 
-    /// <summary>
-    /// Formats NextReminder for display. When today is cancelled, still shows the next
-    /// scheduled reminder (typically tomorrow) — cancellation is shown on ScheduledShutdown.
-    /// </summary>
     public static string FormatNextReminder(
         DateTimeOffset? next,
         bool enabled,
@@ -184,7 +233,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
         var text = FormatRelativeDateTime(next.Value);
         if (todayCancelled && next.Value.Date == DateTimeOffset.Now.Date)
-            return $"今天已取消（不应再提醒）";
+            return "今天已取消（不应再提醒）";
 
         return text;
     }

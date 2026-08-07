@@ -5,7 +5,7 @@ using Xunit;
 
 namespace ShutdownGuard.Tests;
 
-public class ShutdownExecutionCoordinatorTests
+public class ShutdownExecutionCoordinatorTests : ShutdownPolicyTestCleanup
 {
     private static readonly TimeSpan LocalOffset = DateTimeOffset.Now.Offset;
 
