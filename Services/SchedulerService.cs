@@ -78,6 +78,28 @@ public sealed class SchedulerService : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Marks today's reminder as already handled (fired, cancelled, or disabled-for-today)
+    /// so re-arming / changing ReminderStartTime will not catch up again today.
+    /// NextReminder advances to tomorrow's ReminderStart.
+    /// </summary>
+    public void MarkTodayReminderHandled()
+    {
+        lock (_lock)
+        {
+            var todayReminder = _policy.GetTodayReminder(_plan, _clock.Now);
+            if (todayReminder is null)
+                return;
+
+            _lastReminderOccurrence = todayReminder.Value;
+            _pendingEntryReason = ReminderWindowEntryReason.Scheduled;
+            _armedOccurrence = todayReminder.Value.AddDays(1);
+            SyncNextReminder();
+            AppLogger.Info(
+                $"Today's reminder marked handled — next: {_armedOccurrence:yyyy-MM-dd HH:mm}");
+        }
+    }
+
     // ── Lifecycle ────────────────────────────────────────────────
 
     public void Start()
@@ -129,6 +151,7 @@ public sealed class SchedulerService : IAsyncDisposable
     /// <summary>
     /// Arms the next reminder-start occurrence:
     /// - Disabled → null
+    /// - Today's reminder already entered/skipped (any ReminderStart that day) → tomorrow
     /// - Before ReminderStart today → today's ReminderStart (Scheduled)
     /// - Inside [ReminderStart, 22:00) and not yet fired → today's ReminderStart (context reason)
     /// - At/after 22:00 → tomorrow's ReminderStart (no catch-up)
@@ -141,6 +164,13 @@ public sealed class SchedulerService : IAsyncDisposable
         var todayReminder = _policy.GetTodayReminder(_plan, _clock.Now);
         if (todayReminder is null)
             return null;
+
+        // Same calendar day already handled — never re-arm today when ReminderStartTime changes.
+        if (HasHandledReminderOnDay(todayReminder.Value))
+        {
+            _pendingEntryReason = ReminderWindowEntryReason.Scheduled;
+            return todayReminder.Value.AddDays(1);
+        }
 
         var now = _clock.Now;
         var todayShutdownDto = new DateTimeOffset(
@@ -157,12 +187,6 @@ public sealed class SchedulerService : IAsyncDisposable
         if (now < todayShutdownDto)
         {
             // Inside reminder window — arm today's start so the loop can enter once.
-            if (_lastReminderOccurrence == todayReminder.Value)
-            {
-                _pendingEntryReason = ReminderWindowEntryReason.Scheduled;
-                return todayReminder.Value.AddDays(1);
-            }
-
             _pendingEntryReason = insideWindowReason;
             return todayReminder;
         }
@@ -170,6 +194,20 @@ public sealed class SchedulerService : IAsyncDisposable
         // Past fixed shutdown — wait for tomorrow (never catch up shutdown or reminder).
         _pendingEntryReason = ReminderWindowEntryReason.Scheduled;
         return todayReminder.Value.AddDays(1);
+    }
+
+    /// <summary>
+    /// True when any reminder occurrence on the same local calendar day was already entered/skipped.
+    /// Compares by date, not exact ReminderStartTime, so Save with a new time cannot revive today.
+    /// </summary>
+    private bool HasHandledReminderOnDay(DateTimeOffset dayReminder)
+    {
+        if (_lastReminderOccurrence is not { } last)
+            return false;
+
+        return last.Year == dayReminder.Year
+            && last.Month == dayReminder.Month
+            && last.Day == dayReminder.Day;
     }
 
     private void SyncNextReminder()

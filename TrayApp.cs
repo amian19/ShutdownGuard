@@ -76,6 +76,11 @@ public sealed class TrayApp : IAsyncDisposable
         AppLogger.Info("Scheduler started");
 
         _scheduler.Start();
+
+        // Restart with today already cancelled → no catch-up; NextReminder = tomorrow.
+        if (IsTodayCancelled())
+            _scheduler.MarkTodayReminderHandled();
+
         RefreshTray();
     }
 
@@ -89,7 +94,12 @@ public sealed class TrayApp : IAsyncDisposable
         _scheduler.UpdatePlan(newConfig.Shutdown);
 
         if (!newConfig.Shutdown.Enabled)
-            _session.Dismiss();
+        {
+            // Same-day: no more reminders; next day cancel date expires automatically.
+            _session.SuppressTodayAndDismiss();
+            _scheduler.MarkTodayReminderHandled();
+            _reminderWindow?.Hide();
+        }
 
         RefreshTray();
     }
@@ -107,6 +117,9 @@ public sealed class TrayApp : IAsyncDisposable
 
         if (!_config.Shutdown.Enabled)
             return "ShutdownGuard — 已停用";
+
+        if (IsTodayCancelled())
+            return "ShutdownGuard — 已取消本次关机";
 
         var session = _session.Current;
         if (session.Phase == ReminderSessionPhase.Active)
@@ -167,6 +180,7 @@ public sealed class TrayApp : IAsyncDisposable
                 ReminderSessionPhase.Active => $"提醒中 → {session.FixedShutdownAt:HH:mm}",
                 ReminderSessionPhase.Cancelled => "已取消本次",
                 ReminderSessionPhase.Due => "已到关机时间",
+                _ when IsTodayCancelled() => "已取消本次",
                 _ => SettingsViewModel.FormatNextReminder(
                     _scheduler.NextReminder, _config.Shutdown.Enabled)
             };
@@ -192,7 +206,7 @@ public sealed class TrayApp : IAsyncDisposable
 
         menu.Items.Add(new Separator());
 
-        if (session.Phase is ReminderSessionPhase.Active or ReminderSessionPhase.Cancelled)
+        if (session.Phase == ReminderSessionPhase.Active)
         {
             var showReminder = new MenuItem { Header = "显示提醒窗口" };
             showReminder.Click += (_, _) => ShowReminderWindow();
@@ -239,7 +253,16 @@ public sealed class TrayApp : IAsyncDisposable
             return;
         }
 
-        _settingsWindow = new SettingsWindow(_scheduler, _store, _config);
+        // Align NextReminder with cancel before opening settings (shows 明天, not 今天).
+        if (IsTodayCancelled())
+            _scheduler.MarkTodayReminderHandled();
+
+        _settingsWindow = new SettingsWindow(
+            _scheduler,
+            _store,
+            _config,
+            todayCancelled: IsTodayCancelled(),
+            isTodayCancelled: IsTodayCancelled);
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         _settingsWindow.Saved += (_, _) =>
         {
@@ -247,10 +270,21 @@ public sealed class TrayApp : IAsyncDisposable
             _configProvider.Update(_config);
             _session.UpdateDryRunDisplay(_config.Shutdown.DryRun);
             if (!_config.Shutdown.Enabled)
-                _session.Dismiss();
+            {
+                _session.SuppressTodayAndDismiss();
+                _scheduler.MarkTodayReminderHandled();
+                _reminderWindow?.Hide();
+            }
             RefreshTray();
         };
         _settingsWindow.Show();
+    }
+
+    private bool IsTodayCancelled()
+    {
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        return _cancellationStore.ReadCancellationState(today).Status
+            == DailyCancellationStatus.Cancelled;
     }
 
     private void ShowReminderWindow()
@@ -292,7 +326,8 @@ public sealed class TrayApp : IAsyncDisposable
             if (_disposed) return;
 
             _session.BeginSession(occurrence, _config.Shutdown.DryRun);
-            if (_session.Current.Phase is ReminderSessionPhase.Active or ReminderSessionPhase.Cancelled)
+            // Only Active pops the toast. Cancelled (today already cancelled/disabled) stays silent.
+            if (_session.Current.Phase == ReminderSessionPhase.Active)
                 ShowReminderWindow();
             RefreshTray();
         });
@@ -334,8 +369,18 @@ public sealed class TrayApp : IAsyncDisposable
         {
             if (_disposed) return;
 
-            if (snapshot.Phase == ReminderSessionPhase.Due)
+            if (snapshot.Phase == ReminderSessionPhase.Due
+                || snapshot.Phase == ReminderSessionPhase.Idle)
+            {
                 _reminderWindow?.Hide();
+            }
+
+            if (snapshot.Phase == ReminderSessionPhase.Cancelled)
+            {
+                // Skip the rest of today's scheduler catch-up; tray/settings show tomorrow.
+                _scheduler.MarkTodayReminderHandled();
+                _reminderWindow?.Hide();
+            }
 
             RefreshTray();
         });

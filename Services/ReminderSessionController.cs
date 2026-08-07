@@ -152,7 +152,9 @@ public sealed class ReminderSessionController : IAsyncDisposable
     }
 
     /// <summary>
-    /// Ends the in-memory session without writing CancelledDate (used when Enabled=false).
+    /// Ends the in-memory session without writing CancelledDate.
+    /// Prefer <see cref="SuppressTodayAndDismiss"/> when the user disables auto-shutdown,
+    /// so today's reminder/shutdown stay suppressed even if they re-enable later today.
     /// </summary>
     public void Dismiss()
     {
@@ -173,6 +175,30 @@ public sealed class ReminderSessionController : IAsyncDisposable
         }
 
         Publish(publish);
+    }
+
+    /// <summary>
+    /// Disables today's shutdown the same way CancelToday does for persistence:
+    /// writes CancelledShutdownDate for the local calendar day, then ends the session.
+    /// Next calendar day the date expires and reminders work again once Enabled=true.
+    /// Persistence is best-effort — session is always dismissed.
+    /// </summary>
+    public void SuppressTodayAndDismiss()
+    {
+        var day = DateOnly.FromDateTime(_clock.Now.DateTime);
+        try
+        {
+            _cancellationStore.SaveCancelledDate(day);
+            AppLogger.Info(
+                $"Today suppressed via disable for {day:yyyy-MM-dd}; no reminder/shutdown today");
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error(
+                $"Failed to persist suppress-today on disable (still dismissing): {ex.Message}");
+        }
+
+        Dismiss();
     }
 
     /// <summary>Updates DryRun display flag only — never affects Due / ShutdownDue.</summary>

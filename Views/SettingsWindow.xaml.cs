@@ -10,6 +10,7 @@ public partial class SettingsWindow : Window
     private readonly SchedulerService _scheduler;
     private readonly ConfigStore _store;
     private readonly AppConfig _originalConfig;
+    private readonly Func<bool> _isTodayCancelled;
     private readonly SettingsViewModel _viewModel = new();
     private bool _isSaving;
 
@@ -20,13 +21,19 @@ public partial class SettingsWindow : Window
     /// </summary>
     public event EventHandler? Saved;
 
-    public SettingsWindow(SchedulerService scheduler, ConfigStore store, AppConfig config)
+    public SettingsWindow(
+        SchedulerService scheduler,
+        ConfigStore store,
+        AppConfig config,
+        bool todayCancelled = false,
+        Func<bool>? isTodayCancelled = null)
     {
         InitializeComponent();
 
         _scheduler = scheduler;
         _store = store;
         _originalConfig = config;
+        _isTodayCancelled = isTodayCancelled ?? (() => todayCancelled);
 
         DataContext = _viewModel;
 
@@ -36,7 +43,7 @@ public partial class SettingsWindow : Window
         for (int m = 0; m < 60; m++)
             MinuteComboBox.Items.Add(m);
 
-        _viewModel.Load(config, scheduler.NextReminder);
+        _viewModel.Load(config, scheduler.NextReminder, todayCancelled);
 
         _viewModel.PropertyChanged += (_, e) =>
         {
@@ -151,10 +158,15 @@ public partial class SettingsWindow : Window
         // Persistence succeeded — update runtime scheduler once.
         _scheduler.UpdatePlan(plan);
 
+        // Today already cancelled: keep "明天" — do not let a ReminderStart change revive today.
+        if (_isTodayCancelled())
+            _scheduler.MarkTodayReminderHandled();
+
+        var cancelled = _isTodayCancelled();
         _viewModel.NextReminderText = SettingsViewModel.FormatNextReminder(
-            _scheduler.NextReminder, plan.Enabled);
+            _scheduler.NextReminder, plan.Enabled, cancelled);
         _viewModel.ScheduledShutdownText = SettingsViewModel.FormatScheduledShutdown(
-            _scheduler.NextReminder, plan.Enabled);
+            _scheduler.NextReminder, plan.Enabled, cancelled);
 
         AppLogger.Info(
             $"Settings saved: Enabled={plan.Enabled}, " +

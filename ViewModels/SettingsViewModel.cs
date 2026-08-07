@@ -77,7 +77,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     /// Populates the ViewModel from a loaded config and scheduler state.
     /// Creates a working copy — the original config is not mutated.
     /// </summary>
-    public void Load(AppConfig config, DateTimeOffset? nextReminder)
+    public void Load(AppConfig config, DateTimeOffset? nextReminder, bool todayCancelled = false)
     {
         _enabled = config.Shutdown.Enabled;
         _reminderHour = config.Shutdown.ReminderStartTime.Hour;
@@ -85,8 +85,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _dryRun = config.Shutdown.DryRun;
         _runAtStartup = config.RunAtStartup;
         _validationError = null;
-        _nextReminderText = FormatNextReminder(nextReminder, config.Shutdown.Enabled);
-        _scheduledShutdownText = FormatScheduledShutdown(nextReminder, config.Shutdown.Enabled);
+        _nextReminderText = FormatNextReminder(nextReminder, config.Shutdown.Enabled, todayCancelled);
+        _scheduledShutdownText = FormatScheduledShutdown(
+            nextReminder, config.Shutdown.Enabled, todayCancelled);
     }
 
     /// <summary>
@@ -134,24 +135,28 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Formats NextReminder for display. Presentation only — does not recalculate scheduling.
-    /// </summary>
-    public static string FormatNextReminder(DateTimeOffset? next, bool enabled)
-    {
-        if (!enabled || next is null)
-            return "无";
-
-        return FormatRelativeDateTime(next.Value);
-    }
-
-    /// <summary>
     /// Formats the planned fixed shutdown (22:00 on the same day as NextReminder).
+    /// When today is already cancelled, shows that explicitly instead of "今天 22:00".
     /// Presentation only — does not participate in shutdown scheduling.
     /// </summary>
-    public static string FormatScheduledShutdown(DateTimeOffset? nextReminder, bool enabled)
+    public static string FormatScheduledShutdown(
+        DateTimeOffset? nextReminder,
+        bool enabled,
+        bool todayCancelled = false)
     {
         if (!enabled || nextReminder is null)
             return "无";
+
+        var now = DateTimeOffset.Now;
+        if (todayCancelled)
+        {
+            // Next reminder should already be tomorrow after MarkTodayReminderHandled;
+            // still label clearly when the next shutdown day is tomorrow.
+            if (nextReminder.Value.Date > now.Date)
+                return $"明天 {ShutdownPolicy.FixedShutdownTime:HH:mm}（今天已取消）";
+
+            return "今天已取消";
+        }
 
         var shutdown = new DateTimeOffset(
             nextReminder.Value.Year,
@@ -163,6 +168,25 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             nextReminder.Value.Offset);
 
         return FormatRelativeDateTime(shutdown);
+    }
+
+    /// <summary>
+    /// Formats NextReminder for display. When today is cancelled, still shows the next
+    /// scheduled reminder (typically tomorrow) — cancellation is shown on ScheduledShutdown.
+    /// </summary>
+    public static string FormatNextReminder(
+        DateTimeOffset? next,
+        bool enabled,
+        bool todayCancelled = false)
+    {
+        if (!enabled || next is null)
+            return "无";
+
+        var text = FormatRelativeDateTime(next.Value);
+        if (todayCancelled && next.Value.Date == DateTimeOffset.Now.Date)
+            return $"今天已取消（不应再提醒）";
+
+        return text;
     }
 
     public static string FormatRelativeDateTime(DateTimeOffset value)

@@ -171,6 +171,33 @@ public class SettingsViewModelTests
     }
 
     [Fact]
+    public void ScheduledShutdown_TodayCancelled_ShowsCancelledLabel()
+    {
+        var now = DateTimeOffset.Now;
+        var reminderTomorrow = new DateTimeOffset(now.Year, now.Month, now.Day, 18, 0, 0, now.Offset)
+            .AddDays(1);
+
+        var text = SettingsViewModel.FormatScheduledShutdown(reminderTomorrow, true, todayCancelled: true);
+
+        Assert.Contains("今天已取消", text);
+        Assert.StartsWith("明天", text);
+    }
+
+    [Fact]
+    public void ScheduledShutdown_TodayCancelled_NextStillToday_ShowsCancelledOnly()
+    {
+        var now = DateTimeOffset.Now;
+        var reminderToday = new DateTimeOffset(now.Year, now.Month, now.Day, 18, 0, 0, now.Offset);
+
+        Assert.Equal(
+            "今天已取消",
+            SettingsViewModel.FormatScheduledShutdown(reminderToday, true, todayCancelled: true));
+        Assert.Equal(
+            "今天已取消（不应再提醒）",
+            SettingsViewModel.FormatNextReminder(reminderToday, true, todayCancelled: true));
+    }
+
+    [Fact]
     public void ScheduledShutdown_Disabled_IsNone()
     {
         Assert.Equal("无", SettingsViewModel.FormatScheduledShutdown(D(2026, 8, 6, 18, 0), false));

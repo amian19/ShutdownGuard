@@ -202,6 +202,65 @@ public class ReminderSessionControllerTests
     }
 
     [Fact]
+    public async Task SuppressTodayAndDismiss_PersistsCancel_AndEndsSession()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 10, 0) };
+        var store = new MemoryDailyCancellationStore();
+        var session = Create(clock, store);
+
+        // Morning disable — no Active session yet.
+        session.SuppressTodayAndDismiss();
+
+        Assert.Equal(ReminderSessionPhase.Idle, session.Current.Phase);
+        Assert.Equal(new DateOnly(2026, 8, 6), store.CancelledDate);
+
+        // Later that day, re-enable catch-up would BeginSession → Cancelled, not Active.
+        clock.Now = D(2026, 8, 6, 19, 0);
+        session.BeginSession(D(2026, 8, 6, 18, 0));
+        Assert.Equal(ReminderSessionPhase.Cancelled, session.Current.Phase);
+        Assert.Equal(0, session.ShutdownDueCount);
+
+        await session.StopAsync();
+    }
+
+    [Fact]
+    public async Task SuppressTodayAndDismiss_WhileActive_BlocksDue_AndNextDayRecovers()
+    {
+        var store = new MemoryDailyCancellationStore();
+
+        var clock1 = new FakeClock { Now = D(2026, 8, 6, 19, 0) };
+        var session1 = Create(clock1, store);
+        session1.BeginSession(D(2026, 8, 6, 18, 0));
+        session1.SuppressTodayAndDismiss();
+
+        Assert.Equal(ReminderSessionPhase.Idle, session1.Current.Phase);
+        Assert.Equal(new DateOnly(2026, 8, 6), store.CancelledDate);
+        await session1.StopAsync();
+
+        // Next day: cancellation expires → Active again.
+        var clock2 = new FakeClock { Now = D(2026, 8, 7, 18, 0) };
+        var session2 = Create(clock2, store);
+        session2.BeginSession(D(2026, 8, 7, 18, 0));
+        Assert.Equal(ReminderSessionPhase.Active, session2.Current.Phase);
+        await session2.StopAsync();
+    }
+
+    [Fact]
+    public async Task SuppressToday_SaveFailure_StillDismisses()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 19, 0) };
+        var store = new MemoryDailyCancellationStore { ThrowOnSave = true };
+        var session = Create(clock, store);
+
+        session.BeginSession(D(2026, 8, 6, 18, 0));
+        session.SuppressTodayAndDismiss();
+
+        Assert.Equal(ReminderSessionPhase.Idle, session.Current.Phase);
+        Assert.Null(store.CancelledDate);
+        await session.StopAsync();
+    }
+
+    [Fact]
     public async Task Cancelled_NeverRaisesShutdownDue()
     {
         var clock = new FakeClock { Now = D(2026, 8, 6, 20, 0) };

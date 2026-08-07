@@ -440,6 +440,32 @@ public class SchedulerServiceTests
     }
 
     [Fact]
+    public void MarkTodayReminderHandled_AdvancesToTomorrow()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 10, 0) };
+        var scheduler = new SchedulerService(clock);
+        scheduler.UpdatePlan(DefaultPlan(hour: 18));
+
+        scheduler.MarkTodayReminderHandled();
+
+        Assert.Equal(D(2026, 8, 7, 18, 0), scheduler.NextReminder!.Value);
+    }
+
+    [Fact]
+    public void UpdatePlan_AfterTodayHandled_ChangingReminderKeepsTomorrow()
+    {
+        var clock = new FakeClock { Now = D(2026, 8, 6, 20, 0) };
+        var scheduler = new SchedulerService(clock);
+        scheduler.UpdatePlan(DefaultPlan(hour: 18));
+        scheduler.MarkTodayReminderHandled();
+        Assert.Equal(D(2026, 8, 7, 18, 0), scheduler.NextReminder!.Value);
+
+        // Changing ReminderStart must not revive today's catch-up.
+        scheduler.UpdatePlan(DefaultPlan(hour: 19, minute: 30));
+        Assert.Equal(D(2026, 8, 7, 19, 30), scheduler.NextReminder!.Value);
+    }
+
+    [Fact]
     public void UpdatePlan_ChangeReminderToPastOutsideWindow_SchedulesTomorrow()
     {
         // At 21:00, changing reminder to 20:00 is still inside [20:00, 22:00)
