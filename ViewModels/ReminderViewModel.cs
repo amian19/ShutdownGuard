@@ -73,7 +73,7 @@ public sealed class ReminderViewModel : INotifyPropertyChanged
             case ReminderSessionPhase.Due:
                 StatusText = "已到达计划关机时间";
                 CanCancel = false;
-                IsVisiblePhase = true;
+                IsVisiblePhase = false;
                 break;
             default:
                 StatusText = "";

@@ -34,7 +34,6 @@ public sealed class FileDailyCancellationStore : IDailyCancellationStore
         _statePath = DefaultStatePath;
     }
 
-    /// <summary>Test constructor — writes to a custom directory.</summary>
     public FileDailyCancellationStore(string stateDir)
     {
         _stateDir = stateDir;
@@ -43,16 +42,26 @@ public sealed class FileDailyCancellationStore : IDailyCancellationStore
 
     internal string StatePath => _statePath;
 
-    public DateOnly? LoadCancelledDate()
+    public DailyCancellationReadResult ReadCancellationState(DateOnly day)
     {
         lock (_lock)
         {
             try
             {
                 if (!File.Exists(_statePath))
-                    return null;
+                    return DailyCancellationReadResult.NotCancelled;
 
-                var json = File.ReadAllText(_statePath);
+                string json;
+                try
+                {
+                    json = File.ReadAllText(_statePath);
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error($"Runtime state unreadable: {ex.Message}");
+                    return DailyCancellationReadResult.Unavailable(ex.Message);
+                }
+
                 ReminderRuntimeState? state;
                 try
                 {
@@ -60,20 +69,22 @@ public sealed class FileDailyCancellationStore : IDailyCancellationStore
                 }
                 catch (JsonException ex)
                 {
-                    AppLogger.Error($"Runtime state corrupt (treating as not cancelled): {ex.Message}");
-                    return null;
+                    AppLogger.Error($"Runtime state corrupt: {ex.Message}");
+                    return DailyCancellationReadResult.Unavailable($"Corrupt state.json: {ex.Message}");
                 }
 
                 if (state is null)
-                    return null;
+                    return DailyCancellationReadResult.NotCancelled;
 
-                // Best-effort: leave stale dates in place; callers ignore non-today.
-                return state.CancelledShutdownDate;
+                if (state.CancelledShutdownDate == day)
+                    return DailyCancellationReadResult.Cancelled;
+
+                return DailyCancellationReadResult.NotCancelled;
             }
             catch (Exception ex)
             {
-                AppLogger.Error($"Failed to load runtime state: {ex.Message}");
-                return null;
+                AppLogger.Error($"Failed to read runtime state: {ex.Message}");
+                return DailyCancellationReadResult.Unavailable(ex.Message);
             }
         }
     }

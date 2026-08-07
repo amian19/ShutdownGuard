@@ -134,7 +134,9 @@ public class ReminderSessionControllerTests
             session2.BeginSession(D(2026, 8, 6, 18, 0));
 
             Assert.Equal(ReminderSessionPhase.Cancelled, session2.Current.Phase);
-            Assert.Equal(new DateOnly(2026, 8, 6), stateStore.LoadCancelledDate());
+            Assert.Equal(
+                DailyCancellationStatus.Cancelled,
+                stateStore.ReadCancellationState(new DateOnly(2026, 8, 6)).Status);
 
             var configJson = File.ReadAllText(Path.Combine(dir, "config.json"));
             Assert.DoesNotContain("cancelledShutdownDate", configJson, StringComparison.OrdinalIgnoreCase);
@@ -226,7 +228,7 @@ public class ReminderSessionControllerTests
         var session = Create(clock);
         var dueCount = 0;
         DateTimeOffset? dueAt = null;
-        session.ShutdownDue += t => { dueCount++; dueAt = t; };
+        session.ShutdownDue += info => { dueCount++; dueAt = info.ShutdownAt; };
 
         session.BeginSession(D(2026, 8, 6, 18, 0));
         await clock.AdvanceToAsync(D(2026, 8, 6, 21, 59, 1));

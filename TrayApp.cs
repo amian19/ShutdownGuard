@@ -21,6 +21,9 @@ public sealed class TrayApp : IAsyncDisposable
     private readonly ConfigStore _store = new();
     private readonly SchedulerService _scheduler;
     private readonly ReminderSessionController _session;
+    private readonly ShutdownExecutionCoordinator _execution;
+    private readonly MutableAppConfigProvider _configProvider;
+    private readonly FileDailyCancellationStore _cancellationStore = new();
     private readonly SystemClock _clock = new();
     private TaskbarIcon? _trayIcon;
     private AppConfig _config = new();
@@ -35,17 +38,26 @@ public sealed class TrayApp : IAsyncDisposable
     public TrayApp()
     {
         _scheduler = new SchedulerService(_clock);
-        _session = new ReminderSessionController(_clock, new FileDailyCancellationStore());
+        _session = new ReminderSessionController(_clock, _cancellationStore);
+        _configProvider = new MutableAppConfigProvider(new AppConfig());
+        _execution = new ShutdownExecutionCoordinator(
+            _clock,
+            _configProvider,
+            _cancellationStore,
+            dryRunExecutor: new DryRunShutdownExecutor(),
+            realExecutor: new WindowsShutdownExecutor());
 
         _scheduler.NextReminderChanged += OnNextReminderChanged;
         _scheduler.ReminderWindowStarted += OnReminderWindowStarted;
         _session.StateChanged += OnSessionStateChanged;
         _session.ShutdownDue += OnShutdownDue;
+        _execution.StateChanged += OnExecutionStateChanged;
     }
 
     public void Start()
     {
         _config = _store.Load();
+        _configProvider.Update(_config);
         AppLogger.Init();
         AppLogger.Info("Application started");
 
@@ -71,6 +83,7 @@ public sealed class TrayApp : IAsyncDisposable
     {
         _store.Save(newConfig);
         _config = newConfig;
+        _configProvider.Update(newConfig);
 
         _session.UpdateDryRunDisplay(newConfig.Shutdown.DryRun);
         _scheduler.UpdatePlan(newConfig.Shutdown);
@@ -83,6 +96,15 @@ public sealed class TrayApp : IAsyncDisposable
 
     private string BuildTooltip()
     {
+        var exec = _execution.Current;
+        if (exec.Phase is ShutdownExecutionPhase.DryRunCompleted
+            or ShutdownExecutionPhase.Blocked
+            or ShutdownExecutionPhase.Failed
+            or ShutdownExecutionPhase.RealShutdownRequested)
+        {
+            return $"ShutdownGuard — {exec.Message}";
+        }
+
         if (!_config.Shutdown.Enabled)
             return "ShutdownGuard — 已停用";
 
@@ -111,15 +133,14 @@ public sealed class TrayApp : IAsyncDisposable
     {
         var menu = new ContextMenu();
 
-        var header = new TextBlock
-        {
-            Text = "ShutdownGuard",
-            FontWeight = FontWeights.SemiBold,
-            FontSize = 13
-        };
         menu.Items.Add(new MenuItem
         {
-            Header = header,
+            Header = new TextBlock
+            {
+                Text = "ShutdownGuard",
+                FontWeight = FontWeights.SemiBold,
+                FontSize = 13
+            },
             IsEnabled = false,
             StaysOpenOnClick = true
         });
@@ -128,14 +149,28 @@ public sealed class TrayApp : IAsyncDisposable
 
         var statusText = _config.Shutdown.Enabled ? "已启用" : "已停用";
         var session = _session.Current;
-        string detail = session.Phase switch
+        var exec = _execution.Current;
+
+        string detail;
+        if (exec.Phase is ShutdownExecutionPhase.DryRunCompleted
+            or ShutdownExecutionPhase.Blocked
+            or ShutdownExecutionPhase.Failed
+            or ShutdownExecutionPhase.RealShutdownRequested
+            or ShutdownExecutionPhase.Executing)
         {
-            ReminderSessionPhase.Active => $"提醒中 → {session.FixedShutdownAt:HH:mm}",
-            ReminderSessionPhase.Cancelled => "已取消本次",
-            ReminderSessionPhase.Due => "已到关机时间",
-            _ => SettingsViewModel.FormatNextReminder(
-                _scheduler.NextReminder, _config.Shutdown.Enabled)
-        };
+            detail = exec.Message;
+        }
+        else
+        {
+            detail = session.Phase switch
+            {
+                ReminderSessionPhase.Active => $"提醒中 → {session.FixedShutdownAt:HH:mm}",
+                ReminderSessionPhase.Cancelled => "已取消本次",
+                ReminderSessionPhase.Due => "已到关机时间",
+                _ => SettingsViewModel.FormatNextReminder(
+                    _scheduler.NextReminder, _config.Shutdown.Enabled)
+            };
+        }
 
         menu.Items.Add(new MenuItem
         {
@@ -157,9 +192,7 @@ public sealed class TrayApp : IAsyncDisposable
 
         menu.Items.Add(new Separator());
 
-        if (session.Phase is ReminderSessionPhase.Active
-            or ReminderSessionPhase.Cancelled
-            or ReminderSessionPhase.Due)
+        if (session.Phase is ReminderSessionPhase.Active or ReminderSessionPhase.Cancelled)
         {
             var showReminder = new MenuItem { Header = "显示提醒窗口" };
             showReminder.Click += (_, _) => ShowReminderWindow();
@@ -211,6 +244,7 @@ public sealed class TrayApp : IAsyncDisposable
         _settingsWindow.Saved += (_, _) =>
         {
             _config = _store.Load();
+            _configProvider.Update(_config);
             _session.UpdateDryRunDisplay(_config.Shutdown.DryRun);
             if (!_config.Shutdown.Enabled)
                 _session.Dismiss();
@@ -235,7 +269,7 @@ public sealed class TrayApp : IAsyncDisposable
     {
         var newEnabled = !_config.Shutdown.Enabled;
 
-        var updatedConfig = new AppConfig
+        ApplyConfig(new AppConfig
         {
             RunAtStartup = _config.RunAtStartup,
             Shutdown = new ShutdownPlan
@@ -244,9 +278,8 @@ public sealed class TrayApp : IAsyncDisposable
                 ReminderStartTime = _config.Shutdown.ReminderStartTime,
                 DryRun = _config.Shutdown.DryRun
             }
-        };
+        });
 
-        ApplyConfig(updatedConfig);
         AppLogger.Info($"Scheduler {(newEnabled ? "Enabled" : "Disabled")} (via tray)");
     }
 
@@ -259,15 +292,38 @@ public sealed class TrayApp : IAsyncDisposable
             if (_disposed) return;
 
             _session.BeginSession(occurrence, _config.Shutdown.DryRun);
-            ShowReminderWindow();
+            if (_session.Current.Phase is ReminderSessionPhase.Active or ReminderSessionPhase.Cancelled)
+                ShowReminderWindow();
             RefreshTray();
         });
     }
 
-    private void OnShutdownDue(DateTimeOffset dueAt)
+    private void OnShutdownDue(ShutdownDueInfo due)
     {
-        // M4: signal only. M4.5 will run IShutdownExecutor based on DryRun.
-        AppLogger.Info($"Tray received ShutdownDue at {dueAt:yyyy-MM-dd HH:mm} (no executor in M4)");
+        // Wiring only — all safety/executor decisions live in the coordinator.
+        _execution.HandleShutdownDue(due);
+    }
+
+    private void OnExecutionStateChanged(ShutdownExecutionSnapshot snapshot)
+    {
+        if (_disposed) return;
+
+        Application.Current?.Dispatcher.Invoke(() =>
+        {
+            if (_disposed) return;
+
+            if (snapshot.Phase is ShutdownExecutionPhase.Executing
+                or ShutdownExecutionPhase.DryRunCompleted
+                or ShutdownExecutionPhase.Blocked
+                or ShutdownExecutionPhase.Failed
+                or ShutdownExecutionPhase.RealShutdownRequested)
+            {
+                // Hide reminder window once execution layer owns the outcome.
+                _reminderWindow?.Hide();
+            }
+
+            RefreshTray();
+        });
     }
 
     private void OnSessionStateChanged(ReminderSessionSnapshot snapshot)
@@ -277,6 +333,10 @@ public sealed class TrayApp : IAsyncDisposable
         Application.Current?.Dispatcher.Invoke(() =>
         {
             if (_disposed) return;
+
+            if (snapshot.Phase == ReminderSessionPhase.Due)
+                _reminderWindow?.Hide();
+
             RefreshTray();
         });
     }
@@ -306,6 +366,7 @@ public sealed class TrayApp : IAsyncDisposable
         AppLogger.Info("Scheduler stopped");
         await _session.StopAsync();
         await _scheduler.StopAsync();
+        await _execution.DisposeAsync();
         Application.Current.Shutdown();
     }
 
@@ -318,9 +379,11 @@ public sealed class TrayApp : IAsyncDisposable
         _scheduler.ReminderWindowStarted -= OnReminderWindowStarted;
         _session.StateChanged -= OnSessionStateChanged;
         _session.ShutdownDue -= OnShutdownDue;
+        _execution.StateChanged -= OnExecutionStateChanged;
 
         await _session.DisposeAsync();
         await _scheduler.DisposeAsync();
+        await _execution.DisposeAsync();
         _trayIcon?.Dispose();
     }
 }

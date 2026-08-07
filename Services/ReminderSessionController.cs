@@ -27,9 +27,9 @@ public sealed class ReminderSessionController : IAsyncDisposable
 
     /// <summary>
     /// Raised exactly once when an Active session reaches fixed shutdown time.
-    /// M4.5 consumes this to run IShutdownExecutor.
+    /// M4.5 ShutdownExecutionCoordinator consumes this — Session never calls executors.
     /// </summary>
-    public event Action<DateTimeOffset>? ShutdownDue;
+    public event Action<ShutdownDueInfo>? ShutdownDue;
 
     public ReminderSessionSnapshot Current => BuildSnapshot();
 
@@ -95,6 +95,7 @@ public sealed class ReminderSessionController : IAsyncDisposable
             }
             else
             {
+                // Unavailable cancellation state still allows Active reminder (not dangerous).
                 _phase = ReminderSessionPhase.Active;
                 AppLogger.Info(
                     $"Reminder session started: {reminderOccurrence:yyyy-MM-dd HH:mm} → " +
@@ -218,16 +219,8 @@ public sealed class ReminderSessionController : IAsyncDisposable
 
     private bool IsCancelledForDay_NoLock(DateOnly day)
     {
-        try
-        {
-            var stored = _cancellationStore.LoadCancelledDate();
-            return stored == day;
-        }
-        catch (Exception ex)
-        {
-            AppLogger.Error($"Failed to load cancellation date: {ex.Message}");
-            return false;
-        }
+        var result = _cancellationStore.ReadCancellationState(day);
+        return result.Status == DailyCancellationStatus.Cancelled;
     }
 
     private void EnsureLoopRunning_NoLock()
@@ -289,28 +282,34 @@ public sealed class ReminderSessionController : IAsyncDisposable
                 continue;
 
             DateTimeOffset dueAt;
+            DateTimeOffset reminderAt;
+            DateOnly occurrenceDay;
             ReminderSessionSnapshot? snap = null;
-            Action<DateTimeOffset>? dueHandlers;
+            Action<ShutdownDueInfo>? dueHandlers;
 
             lock (_lock)
             {
-                if (_phase != ReminderSessionPhase.Active || _shutdownDueRaised || _fixedShutdownAt is null)
+                if (_phase != ReminderSessionPhase.Active || _shutdownDueRaised
+                    || _fixedShutdownAt is null || _reminderStartedAt is null || _sessionDay is null)
                     continue;
 
                 _shutdownDueRaised = true;
                 _phase = ReminderSessionPhase.Due;
                 dueAt = _fixedShutdownAt.Value;
+                reminderAt = _reminderStartedAt.Value;
+                occurrenceDay = _sessionDay.Value;
                 ShutdownDueCount++;
                 snap = BuildSnapshot_NoLock();
                 dueHandlers = ShutdownDue;
             }
 
-            AppLogger.Info($"ShutdownDue: {dueAt:yyyy-MM-dd HH:mm} (execution deferred to M4.5)");
+            var dueInfo = new ShutdownDueInfo(occurrenceDay, dueAt, reminderAt);
+            AppLogger.Info($"ShutdownDue: {dueAt:yyyy-MM-dd HH:mm}");
             Publish(snap);
 
             try
             {
-                dueHandlers?.Invoke(dueAt);
+                dueHandlers?.Invoke(dueInfo);
             }
             catch (Exception ex)
             {

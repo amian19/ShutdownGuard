@@ -26,7 +26,12 @@ public partial class ReminderWindow : Window
 
     private void OnSessionStateChanged(Models.ReminderSessionSnapshot snapshot)
     {
-        Dispatcher.Invoke(() => _viewModel.Apply(snapshot));
+        Dispatcher.Invoke(() =>
+        {
+            _viewModel.Apply(snapshot);
+            if (snapshot.Phase == Models.ReminderSessionPhase.Due)
+                Hide();
+        });
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e)

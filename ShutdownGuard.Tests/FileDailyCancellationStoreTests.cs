@@ -23,7 +23,8 @@ public class FileDailyCancellationStoreTests : IDisposable
     public void MissingState_IsNotCancelled()
     {
         var store = new FileDailyCancellationStore(_dir);
-        Assert.Null(store.LoadCancelledDate());
+        var result = store.ReadCancellationState(new DateOnly(2026, 8, 6));
+        Assert.Equal(DailyCancellationStatus.NotCancelled, result.Status);
         Assert.False(File.Exists(store.StatePath));
     }
 
@@ -41,30 +42,33 @@ public class FileDailyCancellationStoreTests : IDisposable
     }
 
     [Fact]
-    public void TodayCancelled_LoadsToday()
+    public void TodayCancelled_StatusCancelled()
     {
         var store = new FileDailyCancellationStore(_dir);
         store.SaveCancelledDate(new DateOnly(2026, 8, 6));
-        Assert.Equal(new DateOnly(2026, 8, 6), store.LoadCancelledDate());
+        var result = store.ReadCancellationState(new DateOnly(2026, 8, 6));
+        Assert.Equal(DailyCancellationStatus.Cancelled, result.Status);
     }
 
     [Fact]
-    public void YesterdayCancelled_StillLoadsDate_ButSessionTreatsAsExpired()
+    public void YesterdayCancelled_TodayNotCancelled()
     {
-        // Store returns the date; SessionController compares to today.
         var store = new FileDailyCancellationStore(_dir);
         store.SaveCancelledDate(new DateOnly(2026, 8, 5));
-        Assert.Equal(new DateOnly(2026, 8, 5), store.LoadCancelledDate());
+        var result = store.ReadCancellationState(new DateOnly(2026, 8, 6));
+        Assert.Equal(DailyCancellationStatus.NotCancelled, result.Status);
     }
 
     [Fact]
-    public void CorruptState_ReturnsNull_NotCancelled()
+    public void CorruptState_IsUnavailable()
     {
         Directory.CreateDirectory(_dir);
         File.WriteAllText(Path.Combine(_dir, "state.json"), "{abc");
 
         var store = new FileDailyCancellationStore(_dir);
-        Assert.Null(store.LoadCancelledDate());
+        var result = store.ReadCancellationState(new DateOnly(2026, 8, 6));
+        Assert.Equal(DailyCancellationStatus.Unavailable, result.Status);
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
     }
 
     [Fact]
@@ -86,10 +90,11 @@ public class FileDailyCancellationStoreTests : IDisposable
             }
         });
 
-        // Config save must not wipe or own cancellation.
         var configJson = File.ReadAllText(Path.Combine(_dir, "config.json"));
         Assert.DoesNotContain("cancelledShutdownDate", configJson, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(new DateOnly(2026, 8, 6), stateStore.LoadCancelledDate());
+        Assert.Equal(
+            DailyCancellationStatus.Cancelled,
+            stateStore.ReadCancellationState(new DateOnly(2026, 8, 6)).Status);
 
         var loaded = configStore.Load();
         Assert.Equal(new TimeOnly(19, 30), loaded.Shutdown.ReminderStartTime);
