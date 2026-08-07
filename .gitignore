@@ -62,10 +62,13 @@ TestResults/
 
 # NuGet
 .nuget/
+.local-nuget/
 packages/
 !packages/build/
 *.nuget.props
 *.nuget.targets
+NuGet.Offline.config
+NuGet.Publish.config
 
 # Generated / temp
 *.g.cs

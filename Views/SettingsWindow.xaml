@@ -130,35 +130,7 @@
                                VerticalAlignment="Center"/>
                 </Grid>
 
-                <!-- Safety -->
-                <TextBlock Text="安全设置"
-                           FontSize="14" FontWeight="SemiBold"
-                           Foreground="{StaticResource TitleBrush}"
-                           Margin="0,0,0,10"/>
-                <Grid Margin="0,0,0,6">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="安全测试模式"
-                               VerticalAlignment="Center"/>
-                    <ui:ToggleSwitch Grid.Column="1"
-                                     IsChecked="{Binding DryRun, Mode=TwoWay}"/>
-                </Grid>
-                <TextBlock Text="开启后会正常提醒，但最终不会真正关机。日常使用请保持开启。"
-                           FontSize="11"
-                           Foreground="{StaticResource HintBrush}"
-                           TextWrapping="Wrap"
-                           Margin="0,0,0,4"/>
-                <TextBlock x:Name="DryRunWarningText"
-                           Text="警告：关闭后，到达关机时间将执行强制关机（shutdown /s /f /t 0）。"
-                           FontSize="11"
-                           Foreground="#C05600"
-                           TextWrapping="Wrap"
-                           Visibility="Collapsed"
-                           Margin="0,0,0,20"/>
-
-                <!-- DEBUG: custom test shutdown clock -->
+                <!-- Test shutdown clock -->
                 <StackPanel x:Name="DebugTestSection" Margin="0,0,0,20">
                     <TextBlock Text="开发测试"
                                FontSize="14" FontWeight="SemiBold"
@@ -189,7 +161,7 @@
                                   SelectedItem="{Binding TestShutdownMinute, Mode=TwoWay}"
                                   ItemStringFormat="{}{0:D2}"/>
                     </StackPanel>
-                    <TextBlock Text="开启后：到你设的时刻走完整关机流程（仍受安全测试模式约束）。正式版始终 22:00，忽略此项。"
+                    <TextBlock Text="开启后可把关机时刻改成任意时间，方便试用（关闭则仍为每天 22:00）。到点会强制关机。"
                                FontSize="11"
                                Foreground="{StaticResource HintBrush}"
                                TextWrapping="Wrap"/>

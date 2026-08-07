@@ -19,7 +19,7 @@ public sealed class ReminderSessionController : IAsyncDisposable
     private ReminderSessionPhase _phase = ReminderSessionPhase.Idle;
     private DateTimeOffset? _reminderStartedAt;
     private DateTimeOffset? _fixedShutdownAt;
-    private bool _dryRunDisplay = true;
+    private bool _dryRunDisplay = false;
     private DateOnly? _sessionDay;
     private bool _shutdownDueRaised;
 
@@ -48,7 +48,7 @@ public sealed class ReminderSessionController : IAsyncDisposable
     /// Begins or restores today's reminder session after Scheduler fires ReminderWindowStarted.
     /// <paramref name="dryRunDisplay"/> is presentation-only and does not change Due behavior.
     /// </summary>
-    public void BeginSession(DateTimeOffset reminderOccurrence, bool dryRunDisplay = true)
+    public void BeginSession(DateTimeOffset reminderOccurrence, bool dryRunDisplay = false)
     {
         ReminderSessionSnapshot? publish = null;
 

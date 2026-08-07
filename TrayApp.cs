@@ -146,10 +146,7 @@ public sealed class TrayApp : IAsyncDisposable
 
         var session = _session.Current;
         if (session.Phase == ReminderSessionPhase.Active)
-        {
-            var dry = _config.Shutdown.DryRun ? " [安全测试]" : "";
-            return $"ShutdownGuard — 提醒中，{session.FixedShutdownAt:HH:mm} 关机{dry}";
-        }
+            return $"ShutdownGuard — 提醒中，{session.FixedShutdownAt:HH:mm} 关机";
 
         if (session.Phase == ReminderSessionPhase.Cancelled)
             return "ShutdownGuard — 已取消本次关机";
@@ -161,8 +158,7 @@ public sealed class TrayApp : IAsyncDisposable
         if (next is null)
             return "ShutdownGuard — 已停用";
 
-        var dryLabel = _config.Shutdown.DryRun ? " [安全测试]" : "";
-        return $"ShutdownGuard — 下次提醒: {next:HH:mm}{dryLabel}";
+        return $"ShutdownGuard — 下次提醒: {next:HH:mm}";
     }
 
     private ContextMenu BuildContextMenu()
@@ -218,12 +214,6 @@ public sealed class TrayApp : IAsyncDisposable
         menu.Items.Add(new MenuItem
         {
             Header = $"固定关机：{ShutdownPolicy.EffectiveFixedShutdownTime:HH:mm}",
-            IsEnabled = false
-        });
-
-        menu.Items.Add(new MenuItem
-        {
-            Header = _config.Shutdown.DryRun ? "安全测试：开启" : "安全测试：关闭",
             IsEnabled = false
         });
 
@@ -334,7 +324,8 @@ public sealed class TrayApp : IAsyncDisposable
             {
                 Enabled = newEnabled,
                 ReminderStartTime = _config.Shutdown.ReminderStartTime,
-                DryRun = _config.Shutdown.DryRun
+                DryRun = false,
+                DebugFixedShutdownTime = _config.Shutdown.DebugFixedShutdownTime
             }
         });
 

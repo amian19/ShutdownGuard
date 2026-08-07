@@ -265,10 +265,10 @@ public class ShutdownExecutionCoordinatorTests : ShutdownPolicyTestCleanup
     }
 
     [Fact]
-    public void DefaultAppConfig_DryRunRemainsTrue()
+    public void DefaultAppConfig_DryRunIsFalse()
     {
-        Assert.True(new AppConfig().Shutdown.DryRun);
-        Assert.True(new ShutdownPlan().DryRun);
+        Assert.False(new AppConfig().Shutdown.DryRun);
+        Assert.False(new ShutdownPlan().DryRun);
     }
 
     private sealed class SpyExecutor : IShutdownExecutor

@@ -29,7 +29,7 @@ public class ConfigStoreTests : IDisposable
 
         Assert.True(config.RunAtStartup);
         Assert.True(config.Shutdown.Enabled);
-        Assert.True(config.Shutdown.DryRun);
+        Assert.False(config.Shutdown.DryRun);
         Assert.Equal(new TimeOnly(18, 0), config.Shutdown.ReminderStartTime);
     }
 
@@ -44,7 +44,7 @@ public class ConfigStoreTests : IDisposable
 
         Assert.True(config.RunAtStartup);
         Assert.False(config.Shutdown.Enabled);
-        Assert.True(config.Shutdown.DryRun);
+        Assert.False(config.Shutdown.DryRun);
         Assert.Equal(new TimeOnly(18, 0), config.Shutdown.ReminderStartTime);
     }
 
@@ -69,7 +69,7 @@ public class ConfigStoreTests : IDisposable
 
         Assert.True(config.Shutdown.Enabled);
         Assert.Equal(new TimeOnly(20, 30), config.Shutdown.ReminderStartTime);
-        Assert.True(config.Shutdown.DryRun);
+        Assert.False(config.Shutdown.DryRun);
     }
 
     [Fact]
@@ -139,7 +139,7 @@ public class ConfigStoreTests : IDisposable
         Assert.True(config.RunAtStartup);
         Assert.True(config.Shutdown.Enabled);
         Assert.Equal(new TimeOnly(18, 0), config.Shutdown.ReminderStartTime);
-        Assert.True(config.Shutdown.DryRun);
+        Assert.False(config.Shutdown.DryRun);
     }
 
     [Fact]
@@ -160,6 +160,7 @@ public class ConfigStoreTests : IDisposable
 
         var config = new ConfigStore(_testDir).Load();
         Assert.Equal(new TimeOnly(19, 0), config.Shutdown.ReminderStartTime);
+        Assert.False(config.Shutdown.DryRun);
     }
 
     [Fact]
@@ -170,6 +171,8 @@ public class ConfigStoreTests : IDisposable
 
         Assert.True(fresh.Shutdown.Enabled);
         Assert.False(corrupt.Shutdown.Enabled);
+        Assert.False(fresh.Shutdown.DryRun);
+        Assert.False(corrupt.Shutdown.DryRun);
         Assert.Equal(ShutdownPolicy.DefaultReminderStartTime, fresh.Shutdown.ReminderStartTime);
         Assert.Equal(ShutdownPolicy.DefaultReminderStartTime, corrupt.Shutdown.ReminderStartTime);
     }

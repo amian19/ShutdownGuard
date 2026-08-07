@@ -76,7 +76,7 @@ public sealed class ConfigStore
             {
                 Enabled = true,
                 ReminderStartTime = ShutdownPolicy.DefaultReminderStartTime,
-                DryRun = true
+                DryRun = false
             }
         };
     }
@@ -94,7 +94,7 @@ public sealed class ConfigStore
             {
                 Enabled = false,
                 ReminderStartTime = ShutdownPolicy.DefaultReminderStartTime,
-                DryRun = true
+                DryRun = false
             }
         };
     }
@@ -111,7 +111,7 @@ public sealed class ConfigStore
             {
                 Enabled = true,
                 ReminderStartTime = ShutdownPolicy.DefaultReminderStartTime,
-                DryRun = true
+                DryRun = false
             }
         };
 
@@ -124,11 +124,8 @@ public sealed class ConfigStore
             else if (enabledEl.ValueKind == JsonValueKind.False) config.Shutdown.Enabled = false;
         }
 
-        if (shutdownEl.TryGetProperty("dryRun", out var dryRunEl))
-        {
-            if (dryRunEl.ValueKind == JsonValueKind.True) config.Shutdown.DryRun = true;
-            else if (dryRunEl.ValueKind == JsonValueKind.False) config.Shutdown.DryRun = false;
-        }
+        // Product rule: DryRun removed — always real shutdown.
+        config.Shutdown.DryRun = false;
 
         // Prefer new field; fall back to legacy shutdownTime → ReminderStartTime migration.
         if (TryReadTimeOnly(shutdownEl, "reminderStartTime", out var reminder))
@@ -162,10 +159,8 @@ public sealed class ConfigStore
             }
         }
 
-#if DEBUG
         if (TryReadTimeOnly(shutdownEl, "debugFixedShutdownTime", out var debugShutdown))
             config.Shutdown.DebugFixedShutdownTime = debugShutdown;
-#endif
 
         return config;
     }

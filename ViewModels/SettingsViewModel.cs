@@ -14,7 +14,6 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private bool _enabled;
     private int _reminderHour;
     private int _reminderMinute;
-    private bool _dryRun;
     private bool _useTestShutdownTime;
     private int _testShutdownHour = 22;
     private int _testShutdownMinute;
@@ -22,12 +21,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private string _scheduledShutdownText = "无";
     private string? _validationError;
 
-    public bool IsDebugBuild =>
-#if DEBUG
-        true;
-#else
-        false;
-#endif
+    /// <summary>Always show test-shutdown controls in settings (for trial builds).</summary>
+    public bool ShowTestShutdownSettings => true;
 
     public bool Enabled
     {
@@ -49,8 +44,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public bool DryRun
     {
-        get => _dryRun;
-        set { _dryRun = value; OnPropertyChanged(); }
+        get => false;
+        set { /* Removed: always real shutdown. */ }
     }
 
     public bool RunAtStartup
@@ -59,7 +54,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set { /* Product rule: always on. */ }
     }
 
-    /// <summary>DEBUG: use custom test shutdown clock instead of 22:00.</summary>
+    /// <summary>Use custom test shutdown clock instead of 22:00.</summary>
     public bool UseTestShutdownTime
     {
         get => _useTestShutdownTime;
@@ -95,7 +90,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         get
         {
             var t = ResolveShutdownTimeForEdit();
-            return IsDebugBuild && _useTestShutdownTime
+            return _useTestShutdownTime
                 ? $"{t:HH:mm}（测试）"
                 : $"{ShutdownPolicy.FixedShutdownTime:HH:mm}";
         }
@@ -114,7 +109,6 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _enabled = config.Shutdown.Enabled;
         _reminderHour = config.Shutdown.ReminderStartTime.Hour;
         _reminderMinute = config.Shutdown.ReminderStartTime.Minute;
-        _dryRun = config.Shutdown.DryRun;
 
         if (config.Shutdown.DebugFixedShutdownTime is { } debug)
         {
@@ -137,7 +131,6 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(Enabled));
         OnPropertyChanged(nameof(ReminderHour));
         OnPropertyChanged(nameof(ReminderMinute));
-        OnPropertyChanged(nameof(DryRun));
         OnPropertyChanged(nameof(UseTestShutdownTime));
         OnPropertyChanged(nameof(TestShutdownHour));
         OnPropertyChanged(nameof(TestShutdownMinute));
@@ -152,8 +145,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         {
             Enabled = _enabled,
             ReminderStartTime = new TimeOnly(_reminderHour, _reminderMinute),
-            DryRun = _dryRun,
-            DebugFixedShutdownTime = IsDebugBuild && _useTestShutdownTime
+            DryRun = false,
+            DebugFixedShutdownTime = _useTestShutdownTime
                 ? new TimeOnly(_testShutdownHour, _testShutdownMinute)
                 : null
         };
@@ -187,7 +180,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     private TimeOnly ResolveShutdownTimeForEdit()
     {
-        if (IsDebugBuild && _useTestShutdownTime)
+        if (_useTestShutdownTime)
             return new TimeOnly(_testShutdownHour, _testShutdownMinute);
         return ShutdownPolicy.FixedShutdownTime;
     }
@@ -198,18 +191,29 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         bool todayCancelled = false,
         TimeOnly? shutdownClock = null)
     {
-        if (!enabled || nextReminder is null)
+        if (!enabled)
             return "无";
 
         var clock = shutdownClock ?? ShutdownPolicy.EffectiveFixedShutdownTime;
         var now = DateTimeOffset.Now;
+        var todayShutdown = new DateTimeOffset(
+            now.Year, now.Month, now.Day,
+            clock.Hour, clock.Minute, 0, now.Offset);
+
         if (todayCancelled)
         {
-            if (nextReminder.Value.Date > now.Date)
+            if (nextReminder is { } n && n.Date > now.Date)
                 return $"明天 {clock:HH:mm}（今天已取消）";
 
             return "今天已取消";
         }
+
+        // Still before today's shutdown → this session is today (even if NextReminder already advanced).
+        if (now < todayShutdown)
+            return FormatRelativeDateTime(todayShutdown);
+
+        if (nextReminder is null)
+            return "无";
 
         var shutdown = new DateTimeOffset(
             nextReminder.Value.Year,

@@ -89,7 +89,7 @@ public sealed class ReminderViewModel : INotifyPropertyChanged
         RemainingText = FormatRemaining(snapshot);
         DryRunText = snapshot.DryRun
             ? "安全测试模式：开启（最终执行阶段不会真正关机）。"
-            : "警告：最终执行阶段将真正关闭 Windows。";
+            : "注意：到点将强制关机，请提前保存工作。";
     }
 
     public static string FormatRemaining(ReminderSessionSnapshot snapshot)
@@ -111,15 +111,28 @@ public sealed class ReminderViewModel : INotifyPropertyChanged
 
     internal static string FormatChineseDuration(TimeSpan ts)
     {
-        var totalMinutes = (int)Math.Floor(ts.TotalMinutes);
-        if (totalMinutes < 1)
-            return $"{Math.Max(0, (int)Math.Floor(ts.TotalSeconds))} 秒";
+        if (ts < TimeSpan.Zero)
+            ts = TimeSpan.Zero;
 
-        var hours = totalMinutes / 60;
-        var minutes = totalMinutes % 60;
-        if (hours > 0 && minutes > 0) return $"{hours} 小时 {minutes} 分钟";
-        if (hours > 0) return $"{hours} 小时";
-        return $"{minutes} 分钟";
+        // Use clock components (not Floor(TotalMinutes)) so 1m59s shows as
+        // "1 分钟 59 秒" instead of truncating to "1 分钟".
+        var hours = (int)Math.Floor(ts.TotalHours);
+        var minutes = ts.Minutes;
+        var seconds = ts.Seconds;
+
+        if (hours > 0)
+        {
+            if (minutes > 0) return $"{hours} 小时 {minutes} 分钟";
+            return $"{hours} 小时";
+        }
+
+        if (minutes > 0)
+        {
+            if (seconds > 0) return $"{minutes} 分钟 {seconds} 秒";
+            return $"{minutes} 分钟";
+        }
+
+        return $"{seconds} 秒";
     }
 
     private void OnPropertyChanged([CallerMemberName] string? name = null)

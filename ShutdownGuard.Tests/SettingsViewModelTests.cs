@@ -13,7 +13,7 @@ public class SettingsViewModelTests
         => new(year, month, day, hour, minute, 0, LocalOffset);
 
     [Fact]
-    public void Defaults_EnabledTrue_Reminder1800_DryRunTrue()
+    public void Defaults_EnabledTrue_Reminder1800_DryRunFalse()
     {
         var config = new AppConfig();
         var vm = new SettingsViewModel();
@@ -22,7 +22,7 @@ public class SettingsViewModelTests
         Assert.True(vm.Enabled);
         Assert.Equal(18, vm.ReminderHour);
         Assert.Equal(0, vm.ReminderMinute);
-        Assert.True(vm.DryRun);
+        Assert.False(vm.DryRun);
         Assert.True(vm.RunAtStartup);
         Assert.Equal("22:00", vm.FixedShutdownDisplay);
     }
@@ -179,16 +179,26 @@ public class SettingsViewModelTests
     }
 
     [Fact]
-    public void ScheduledShutdown_TomorrowWhenReminderTomorrow()
+    public void ScheduledShutdown_BeforeTodayShutdown_ShowsToday_EvenIfNextReminderTomorrow()
     {
         var now = DateTimeOffset.Now;
+        // After reminder already fired, scheduler NextReminder is often tomorrow —
+        // but "本次计划关机" must still be today while before today's fixed clock.
         var reminderTomorrow = new DateTimeOffset(now.Year, now.Month, now.Day, 18, 0, 0, now.Offset)
             .AddDays(1);
 
         var text = SettingsViewModel.FormatScheduledShutdown(reminderTomorrow, true);
 
-        Assert.StartsWith("明天", text);
-        Assert.Contains("22:00", text);
+        if (now.TimeOfDay < ShutdownPolicy.FixedShutdownTime.ToTimeSpan())
+        {
+            Assert.StartsWith("今天", text);
+            Assert.Contains("22:00", text);
+        }
+        else
+        {
+            Assert.StartsWith("明天", text);
+            Assert.Contains("22:00", text);
+        }
     }
 
     [Fact]

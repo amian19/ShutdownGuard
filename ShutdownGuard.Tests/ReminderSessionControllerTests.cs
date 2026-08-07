@@ -432,4 +432,18 @@ public class ReminderSessionControllerTests : ShutdownPolicyTestCleanup
 
         Assert.Equal("剩余时间：0 秒", ViewModels.ReminderViewModel.FormatRemaining(snap));
     }
+
+    [Fact]
+    public void FormatChineseDuration_DoesNotFloorAwayPartialMinute()
+    {
+        Assert.Equal(
+            "1 分钟 59 秒",
+            ViewModels.ReminderViewModel.FormatChineseDuration(TimeSpan.FromMinutes(1) + TimeSpan.FromSeconds(59)));
+        Assert.Equal(
+            "2 分钟",
+            ViewModels.ReminderViewModel.FormatChineseDuration(TimeSpan.FromMinutes(2)));
+        Assert.Equal(
+            "1 小时 30 分钟",
+            ViewModels.ReminderViewModel.FormatChineseDuration(TimeSpan.FromHours(1.5)));
+    }
 }

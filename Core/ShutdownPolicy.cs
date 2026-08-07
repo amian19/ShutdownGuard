@@ -4,8 +4,8 @@ namespace ShutdownGuard.Core;
 
 /// <summary>
 /// Product-level domain rules.
-/// Production fixed shutdown is always 22:00.
-/// DEBUG builds may temporarily override via <see cref="ApplyDebugFixedShutdownOverride"/>.
+/// Default fixed shutdown is 22:00; optional test override via
+/// <see cref="ApplyDebugFixedShutdownOverride"/>.
 /// </summary>
 public static class ShutdownPolicy
 {
@@ -16,35 +16,18 @@ public static class ShutdownPolicy
 
     /// <summary>
     /// Runtime shutdown clock used by Scheduler / Session / Coordinator.
-    /// Release builds always return <see cref="FixedShutdownTime"/> (22:00).
     /// </summary>
     public static TimeOnly EffectiveFixedShutdownTime
-    {
-        get
-        {
-#if DEBUG
-            return _debugFixedShutdownOverride ?? FixedShutdownTime;
-#else
-            return FixedShutdownTime;
-#endif
-        }
-    }
+        => _debugFixedShutdownOverride ?? FixedShutdownTime;
 
     /// <summary>
-    /// DEBUG-only: set or clear the test shutdown time override.
+    /// Optional test shutdown clock (used by the "测试关机时间" setting).
     /// Pass null to restore product 22:00.
     /// </summary>
     public static void ApplyDebugFixedShutdownOverride(TimeOnly? overrideTime)
-    {
-#if DEBUG
-        _debugFixedShutdownOverride = overrideTime;
-#else
-        _ = overrideTime;
-        _debugFixedShutdownOverride = null;
-#endif
-    }
+        => _debugFixedShutdownOverride = overrideTime;
 
-    /// <summary>Test helper — clears any DEBUG override.</summary>
+    /// <summary>Test helper — clears any override.</summary>
     internal static void ResetDebugOverrideForTests()
         => _debugFixedShutdownOverride = null;
 

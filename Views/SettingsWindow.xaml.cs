@@ -50,25 +50,11 @@ public partial class SettingsWindow : Window
             TestShutdownMinuteComboBox.Items.Add(m);
         }
 
-        DebugTestSection.Visibility = _viewModel.IsDebugBuild
+        DebugTestSection.Visibility = _viewModel.ShowTestShutdownSettings
             ? Visibility.Visible
             : Visibility.Collapsed;
 
         _viewModel.Load(config, scheduler.NextReminder, todayCancelled);
-
-        _viewModel.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(SettingsViewModel.DryRun))
-            {
-                DryRunWarningText.Visibility = _viewModel.DryRun
-                    ? Visibility.Collapsed
-                    : Visibility.Visible;
-            }
-        };
-
-        DryRunWarningText.Visibility = _viewModel.DryRun
-            ? Visibility.Collapsed
-            : Visibility.Visible;
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
@@ -158,7 +144,7 @@ public partial class SettingsWindow : Window
         AppLogger.Info(
             $"Settings saved: Enabled={plan.Enabled}, " +
             $"ReminderStart={plan.ReminderStartTime:HH:mm}, " +
-            $"DryRun={plan.DryRun}, RunAtStartup=true");
+            $"DryRun=false, RunAtStartup=true");
 
         Saved?.Invoke(this, EventArgs.Empty);
     }
